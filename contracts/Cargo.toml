@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["clause", "factory", "mock-ft", "sandbox-tests"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/angelraph/clausehold"
+
+[workspace.dependencies]
+near-sdk = "5.30"
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
