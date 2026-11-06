@@ -14,6 +14,13 @@ const ConfigSchema = z.object({
     baseUrl: z.string().url(),
     model: z.string().optional(),
   }),
+  /** The account that pays gas for gasless deliveries. Its key lives only in .env. */
+  relayer: z.object({
+    accountId: z.string().optional(),
+    privateKey: z.string().optional(),
+  }),
+  /** NEAR Intents 1Click partner key. Optional: without it 1Click adds a 0.25% fee. */
+  intentsApiKey: z.string().optional(),
   apiPort: z.coerce.number().int().positive(),
   apiKey: z.string().optional(),
   approverKey: z.string().optional(),
@@ -36,6 +43,11 @@ function loadConfig(): Config {
       baseUrl: process.env.NEARAI_BASE_URL ?? "https://cloud-api.near.ai/v1",
       model: process.env.NEARAI_MODEL || undefined,
     },
+    relayer: {
+      accountId: process.env.CLAUSEHOLD_RELAYER_ACCOUNT || undefined,
+      privateKey: process.env.CLAUSEHOLD_RELAYER_PRIVATE_KEY || undefined,
+    },
+    intentsApiKey: process.env.NEAR_INTENTS_API_KEY || undefined,
     apiPort: process.env.CLAUSEHOLD_API_PORT ?? 4477,
     apiKey: process.env.CLAUSEHOLD_API_KEY || undefined,
     approverKey: process.env.CLAUSEHOLD_APPROVER_KEY || undefined,

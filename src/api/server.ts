@@ -22,6 +22,31 @@ import {
 import type { ApprovalStatus } from "../approval/state.js";
 import { authenticateAgent, constantTimeEquals, registryInUse } from "../agents/service.js";
 import type { AgentRecord } from "../agents/state.js";
+import {
+  InviteNotFoundError,
+  InviteStateError,
+  bindKey,
+  findInviteByProposal,
+  getInvite,
+  openInvite,
+  publicInviteView,
+  writeIfReady,
+} from "../invites/service.js";
+import type { ClauseWriter } from "../near/clauseWriter.js";
+import { OneClickError, assertQuoteFundsClause, buildClauseFundingQuote, findToken, type OneClickClient } from "../near/intents.js";
+import { RelayRefusedError, type RelayResult } from "../near/relayer.js";
+import { toBaseUnits } from "../near/network.js";
+
+/**
+ * What the API needs from the outside world. Each is optional: a route whose
+ * dependency is missing answers 503 and says what to configure, rather than
+ * pretending. Tests pass fakes here.
+ */
+export interface ApiDeps {
+  writer?: ClauseWriter;
+  oneClick?: OneClickClient;
+  relay?: (signedDelegateBase64: string) => Promise<RelayResult>;
+}
 
 export const DEMO_MANDATE_ID = "b2f1e9a0-1a2b-4c3d-8e4f-000000000001";
 
@@ -39,6 +64,29 @@ const ClauseBodySchema = z.object({
 });
 
 const DecisionBodySchema = z.object({ note: z.string().optional() });
+const KeyBodySchema = z.object({ publicKey: z.string().min(10), keySource: z.enum(["passkey-prf", "browser-random"]) });
+const QuoteBodySchema = z.object({
+  /** 1Click assetId of what the payer holds, e.g. USDC on Base. */
+  originAsset: z.string().min(3),
+  /** The payer's address on the origin chain, for a failed swap. */
+  refundTo: z.string().min(3),
+  dry: z.boolean().optional().default(true),
+  slippageBps: z.number().int().min(0).max(1000).optional(),
+});
+const RelayBodySchema = z.object({ signedDelegate: z.string().min(16) });
+
+/**
+ * Routes anyone may call without an agent key. The invite id in the path is
+ * the capability; the relay validates every delegate itself before paying.
+ */
+function isPublicRoute(method: string, path: string): boolean {
+  if (method === "GET" && /^\/invites\/[^/]+$/.test(path)) return true;
+  if (method === "POST" && /^\/invites\/[^/]+\/key$/.test(path)) return true;
+  if (method === "POST" && /^\/clauses\/[^/]+\/fund\/quote$/.test(path)) return true;
+  if (method === "GET" && /^\/funding\/[^/]+$/.test(path)) return true;
+  if (method === "POST" && path === "/relay") return true;
+  return false;
+}
 const HaltBodySchema = z.object({ reason: z.string().optional() });
 
 /** Routes that decide something (approve, reject, halt, resume) rather than propose it. */
@@ -67,11 +115,15 @@ function view(result: RunClauseResult) {
  *     reject, halt, or resume. An agent holding only the first key can never
  *     approve its own escalation.
  */
-export function createApp(): express.Express {
+export function createApp(deps: ApiDeps = {}): express.Express {
   const app = express();
   app.use(express.json());
 
   app.use(async (req: Request, res: Response, next: NextFunction) => {
+    if (isPublicRoute(req.method, req.path)) {
+      next();
+      return;
+    }
     if (isApproverRoute(req.path)) {
       if (!config.approverKey) {
         res.status(403).json({ error: "Approver endpoints are disabled: CLAUSEHOLD_APPROVER_KEY is not set on this server" });
@@ -219,7 +271,18 @@ export function createApp(): express.Express {
       try {
         if (action === "approve") {
           const outcome = await approve(id, approver(req), body.data.note);
-          res.json({ approval: outcome.record, verdict: outcome.verdict, cleared: true });
+          // The approval stands on its own. If the editor's key is already
+          // bound, write the clause now. A chain error is reported to the
+          // caller rather than hidden, and the approval is not undone by it.
+          let invite = null;
+          let writeError: string | null = null;
+          try {
+            const found = await findInviteByProposal(outcome.record.proposal.id);
+            if (found) invite = publicInviteView(await writeIfReady(found.inviteId, deps.writer));
+          } catch (err) {
+            writeError = err instanceof Error ? err.message : String(err);
+          }
+          res.json({ approval: outcome.record, verdict: outcome.verdict, cleared: true, invite, writeError });
         } else {
           res.json({ approval: await reject(id, approver(req), body.data.note) });
         }
@@ -274,6 +337,176 @@ export function createApp(): express.Express {
     res.json(await auditLog.tail(n));
   });
 
+  // ---- Invites: the editor's key exists before the clause is written ----
+
+  app.post("/invites", async (req: Request, res: Response) => {
+    const parsed = ClauseBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid clause", issues: parsed.error.issues });
+      return;
+    }
+    const agent = res.locals.agent as AgentRecord | undefined;
+    let agentId = parsed.data.agentId;
+    if (agent) {
+      if (agentId !== undefined && agentId !== agent.agentId) {
+        res.status(403).json({ error: `This key belongs to agent "${agent.agentId}". It cannot propose as "${agentId}".` });
+        return;
+      }
+      if (!agent.mandateIds.includes(parsed.data.mandateId)) {
+        res.status(403).json({ error: `Agent "${agent.agentId}" is not bound to mandate ${parsed.data.mandateId}` });
+        return;
+      }
+      agentId = agent.agentId;
+    }
+    if (!agentId) {
+      res.status(400).json({ error: "agentId is required when not using a registered agent key" });
+      return;
+    }
+    try {
+      const result = await runClause({ ...parsed.data, agentId });
+      recent.set(result.proposal.id, result);
+      if (result.verdict.decision === "VETO") {
+        res.status(200).json({ ...view(result), invite: null });
+        return;
+      }
+      const { inviteId } = await openInvite(result.proposal);
+      res.status(200).json({ ...view(result), invite: { inviteId, path: `/w/${inviteId}` } });
+    } catch (err) {
+      if (err instanceof MandateNotFoundError) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid clause", issues: err.issues });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get("/invites/:id", async (req: Request, res: Response) => {
+    try {
+      res.json(publicInviteView(await getInvite(req.params.id as string)));
+    } catch (err) {
+      if (err instanceof InviteNotFoundError) {
+        res.status(404).json({ error: "Unknown invite" });
+        return;
+      }
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/invites/:id/key", async (req: Request, res: Response) => {
+    const body = KeyBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ error: "Invalid key", issues: body.error.issues });
+      return;
+    }
+    try {
+      const rec = await bindKey(req.params.id as string, body.data.publicKey, body.data.keySource, deps.writer);
+      const pendingReason = rec.status === "written" ? null : !rec.cleared ? "waiting for a second person to approve the clause" : !deps.writer ? "no chain writer is configured on this server" : null;
+      res.json({ invite: publicInviteView(rec), pendingReason });
+    } catch (err) {
+      if (err instanceof InviteNotFoundError) {
+        res.status(404).json({ error: "Unknown invite" });
+      } else if (err instanceof InviteStateError) {
+        res.status(409).json({ error: err.message });
+      } else {
+        res.status(502).json({ error: `Could not write the clause on chain: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+  });
+
+  // ---- Funding through NEAR Intents (mainnet) ----
+
+  const USDC_DECIMALS = 6;
+
+  app.post("/clauses/:id/fund/quote", async (req: Request, res: Response) => {
+    if (!deps.oneClick) {
+      res.status(503).json({ error: "Intents funding is not configured on this server" });
+      return;
+    }
+    const body = QuoteBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ error: "Invalid quote request", issues: body.error.issues });
+      return;
+    }
+    const invite = await findInviteByProposal(req.params.id as string);
+    if (!invite || invite.status !== "written" || !invite.clauseAccountId) {
+      res.status(409).json({ error: "This clause is not on chain yet, so there is nothing to fund" });
+      return;
+    }
+    try {
+      const tokens = await deps.oneClick.tokens();
+      const destination = findToken(tokens, "near", invite.proposal.asset);
+      const quoteReq = buildClauseFundingQuote({
+        originAsset: body.data.originAsset,
+        destinationAsset: destination.assetId,
+        amountBase: toBaseUnits(invite.proposal.amount, destination.decimals ?? USDC_DECIMALS),
+        clauseAccountId: invite.clauseAccountId,
+        refundTo: body.data.refundTo,
+        deadline: new Date(Math.min(new Date(invite.proposal.deadline).getTime(), Date.now() + 60 * 60_000)),
+        dry: body.data.dry,
+        slippageBps: body.data.slippageBps,
+      });
+      const quote = await deps.oneClick.quote(quoteReq);
+      assertQuoteFundsClause(quote, quoteReq);
+      await auditLog.append("CLAUSE_FUNDING_QUOTED", config.network, {
+        proposalId: invite.proposal.id,
+        clauseAccountId: invite.clauseAccountId,
+        dry: quoteReq.dry,
+        depositAddress: quote.quote.depositAddress ?? null,
+        amountIn: quote.quote.amountIn,
+        amountOut: quote.quote.amountOut,
+        correlationId: quote.correlationId,
+      });
+      res.json({ clauseAccountId: invite.clauseAccountId, destinationAsset: destination.assetId, quote });
+    } catch (err) {
+      if (err instanceof OneClickError) {
+        res.status(502).json({ error: err.message });
+        return;
+      }
+      res.status(422).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get("/funding/:depositAddress", async (req: Request, res: Response) => {
+    if (!deps.oneClick) {
+      res.status(503).json({ error: "Intents funding is not configured on this server" });
+      return;
+    }
+    try {
+      res.json(await deps.oneClick.status(req.params.depositAddress as string));
+    } catch (err) {
+      res.status(err instanceof OneClickError ? 502 : 500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ---- Gasless delivery ----
+
+  app.post("/relay", async (req: Request, res: Response) => {
+    if (!deps.relay) {
+      res.status(503).json({ error: "No relayer is configured on this server" });
+      return;
+    }
+    const body = RelayBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ error: "Body must be { signedDelegate: <base64> }" });
+      return;
+    }
+    try {
+      const result = await deps.relay(body.data.signedDelegate);
+      await auditLog.append("CLAUSE_DELIVERED", config.network, { clauseAccountId: result.senderId, txHash: result.txHash, relayed: true });
+      res.json(result);
+    } catch (err) {
+      if (err instanceof RelayRefusedError) {
+        res.status(422).json({ error: err.message });
+        return;
+      }
+      res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Last resort: never return a stack trace or file paths to a caller.
   app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
     if (res.headersSent) {
@@ -290,7 +523,7 @@ export function createApp(): express.Express {
   return app;
 }
 
-export function startApiServer(): Server {
+export function startApiServer(deps: ApiDeps = {}): Server {
   void registryInUse().then((any) => {
     if (config.requireAgentKeys && !any) {
       console.log("Note: CLAUSEHOLD_REQUIRE_AGENT_KEYS is set but no agents have been registered, so every clause is refused until one is (clausehold agent add).");
@@ -302,11 +535,16 @@ export function startApiServer(): Server {
     console.log("Note: CLAUSEHOLD_APPROVER_KEY is not set, so the approve/reject/halt/resume endpoints are disabled. Use the CLI to decide.");
   }
 
-  return createApp().listen(config.apiPort, () => {
+  return createApp(deps).listen(config.apiPort, () => {
     console.log(`Clausehold API listening on http://localhost:${config.apiPort} (${config.network}, factory ${config.factoryAccountId})`);
     console.log(`  POST   /clauses                    (agent key)`);
     console.log(`  GET    /clauses/:id                (agent key)`);
     console.log(`  GET    /escalations/:approvalId    (agent key)`);
+    console.log(`  POST   /invites                    (agent key)`);
+    console.log(`  GET    /invites/:id                (public: the editor's link)`);
+    console.log(`  POST   /invites/:id/key            (public: binds the editor's key)`);
+    console.log(`  POST   /clauses/:id/fund/quote     (public: Intents quote${deps.oneClick ? "" : ", not configured"})`);
+    console.log(`  POST   /relay                      (public: gasless delivery${deps.relay ? "" : ", not configured"})`);
     console.log(`  GET    /approvals                  (approver key)`);
     console.log(`  POST   /approvals/:id/approve      (approver key)`);
     console.log(`  POST   /approvals/:id/reject       (approver key)`);

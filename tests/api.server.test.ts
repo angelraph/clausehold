@@ -136,7 +136,7 @@ describe("approver credential", () => {
   });
 
   it("passes the named approver and note through to the service", async () => {
-    vi.mocked(service.approve).mockResolvedValue({ record: { status: "granted" }, verdict: {} } as never);
+    vi.mocked(service.approve).mockResolvedValue({ record: { status: "granted", proposal: { id: "p-none" } }, verdict: {} } as never);
     const res = await fetch(`${base}/approvals/ap1/approve`, { method: "POST", headers: { ...json, ...APPROVER }, body: JSON.stringify({ note: "ok" }) });
     expect(res.status).toBe(200);
     expect(service.approve).toHaveBeenCalledWith("ap1", "alice", "ok");

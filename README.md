@@ -2,7 +2,7 @@
 
 Pay a person or an agent for a finished job, on NEAR. The payer funds a clause from whatever chain they already hold, through NEAR Intents, into a sub-account that exists only for that job. The money is held under the clause, and the clause is the only key that moves it: it releases when the work is delivered, and returns to the payer when the clause expires.
 
-> **Status: in progress for NEAR HACKATHON (Nov 1–14, 2026).** This README is a stub. Full "do X, see Y" steps, mainnet transaction hashes and the threat model land before submission.
+> **Status: in progress for NEAR HACKATHON (Nov 1 to 14, 2026).** This README is a stub. Full "do X, see Y" steps, mainnet transaction hashes and the threat model land before submission.
 
 ## What is here now
 
