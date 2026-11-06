@@ -21,6 +21,8 @@ const ConfigSchema = z.object({
   }),
   /** NEAR Intents 1Click partner key. Optional: without it 1Click adds a 0.25% fee. */
   intentsApiKey: z.string().optional(),
+  /** Browser origins allowed to call the API, e.g. the deployed web app. */
+  webOrigins: z.array(z.string()),
   apiPort: z.coerce.number().int().positive(),
   apiKey: z.string().optional(),
   approverKey: z.string().optional(),
@@ -48,6 +50,7 @@ function loadConfig(): Config {
       privateKey: process.env.CLAUSEHOLD_RELAYER_PRIVATE_KEY || undefined,
     },
     intentsApiKey: process.env.NEAR_INTENTS_API_KEY || undefined,
+    webOrigins: (process.env.CLAUSEHOLD_WEB_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173").split(",").map((o) => o.trim()).filter(Boolean),
     apiPort: process.env.CLAUSEHOLD_API_PORT ?? 4477,
     apiKey: process.env.CLAUSEHOLD_API_KEY || undefined,
     approverKey: process.env.CLAUSEHOLD_APPROVER_KEY || undefined,

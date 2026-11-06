@@ -33,6 +33,7 @@ import {
   writeIfReady,
 } from "../invites/service.js";
 import type { ClauseWriter } from "../near/clauseWriter.js";
+import { deriveDesk } from "../desk/view.js";
 import { OneClickError, assertQuoteFundsClause, buildClauseFundingQuote, findToken, type OneClickClient } from "../near/intents.js";
 import { RelayRefusedError, type RelayResult } from "../near/relayer.js";
 import { toBaseUnits } from "../near/network.js";
@@ -118,6 +119,22 @@ function view(result: RunClauseResult) {
 export function createApp(deps: ApiDeps = {}): express.Express {
   const app = express();
   app.use(express.json());
+
+  // Only the web app's own origins may call the API from a browser.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const origin = req.get("Origin");
+    if (origin && (config.webOrigins ?? []).includes(origin)) {
+      res.set("Access-Control-Allow-Origin", origin);
+      res.set("Vary", "Origin");
+      res.set("Access-Control-Allow-Headers", "Content-Type, X-Clausehold-Api-Key, X-Clausehold-Approver-Key, X-Clausehold-Approver");
+      res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    }
+    if (req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
 
   app.use(async (req: Request, res: Response, next: NextFunction) => {
     if (isPublicRoute(req.method, req.path)) {
@@ -330,6 +347,13 @@ export function createApp(deps: ApiDeps = {}): express.Express {
     } catch {
       res.status(404).json({ error: `No mandate found with id ${id}` });
     }
+  });
+
+  app.get("/desk/clauses", async (_req: Request, res: Response) => {
+    const agent = res.locals.agent as AgentRecord | undefined;
+    const rows = deriveDesk(await auditLog.all());
+    // A registered agent sees only its own clauses.
+    res.json(agent ? rows.filter((r) => r.proposal.agentId === agent.agentId) : rows);
   });
 
   app.get("/audit/tail", async (req: Request, res: Response) => {
