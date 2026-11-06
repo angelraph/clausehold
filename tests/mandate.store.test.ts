@@ -68,3 +68,24 @@ describe("loadMandate", () => {
     expect(loaded).toEqual(mandate);
   });
 });
+
+describe("demo mandate seeding", () => {
+  it("stores the demo mandate on first use when seeding is on, pointed at this network's factory", async () => {
+    const before = config.seedDemoMandate;
+    config.seedDemoMandate = true;
+    try {
+      const m = await loadMandate("b2f1e9a0-1a2b-4c3d-8e4f-000000000001");
+      expect(m.factoryAccountId).toBe(config.factoryAccountId);
+      expect(m.limits.maxPerClause).toBe(25);
+      // It is now really stored, not just returned.
+      config.seedDemoMandate = false;
+      expect((await loadMandate(m.id)).id).toBe(m.id);
+    } finally {
+      config.seedDemoMandate = before;
+    }
+  });
+
+  it("does not invent a mandate when seeding is off", async () => {
+    await expect(loadMandate("b2f1e9a0-1a2b-4c3d-8e4f-000000000001")).rejects.toBeInstanceOf(MandateNotFoundError);
+  });
+});

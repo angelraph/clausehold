@@ -5,6 +5,7 @@ import { clauseProposeCommand } from "./cli/commands/clause.js";
 import { auditTailCommand, auditVerifyCommand } from "./cli/commands/audit.js";
 import { mandateCompileCommand } from "./cli/commands/mandate.js";
 import { startApiServer, DEMO_MANDATE_ID } from "./api/server.js";
+import { depsFromConfig } from "./api/deps.js";
 import { startDashboard } from "./cli/ui.js";
 import { agentAddCommand, agentListCommand, agentRevokeCommand, agentRotateCommand } from "./cli/commands/agents.js";
 import { approvalsListCommand, approveCommand, controlStatusCommand, haltCommand, rejectCommand, resumeCommand } from "./cli/commands/control.js";
@@ -70,7 +71,7 @@ program
   .command("serve")
   .description("Start the local HTTP API agents propose clauses against (POST /clauses)")
   .action(() => {
-    startApiServer();
+    startApiServer(depsFromConfig());
   });
 
 const mandate = program.command("mandate").description("Manage mandates (a treasury's rule, compiled into live policy)");

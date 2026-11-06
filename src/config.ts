@@ -30,6 +30,15 @@ const ConfigSchema = z.object({
   approvalTtlMinutes: z.coerce.number().positive(),
   auditLogPath: z.string(),
   mandatesDir: z.string(),
+  /** Store the demo mandate on first use when the database is empty (hosted desks). */
+  seedDemoMandate: z.boolean(),
+  /** Upstash Redis for serverless hosting. When unset, records are kept in files. */
+  storage: z.object({
+    upstashUrl: z.string().url().optional(),
+    upstashToken: z.string().optional(),
+    /** Keeps testnet and mainnet records apart when they share one database. */
+    prefix: z.string().min(1),
+  }),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -58,6 +67,13 @@ function loadConfig(): Config {
     approvalTtlMinutes: process.env.CLAUSEHOLD_APPROVAL_TTL_MINUTES ?? 10,
     auditLogPath: process.env.CLAUSEHOLD_AUDIT_LOG_PATH ?? "./data/audit.log.jsonl",
     mandatesDir: process.env.CLAUSEHOLD_MANDATES_DIR ?? "./data/mandates",
+    seedDemoMandate: process.env.CLAUSEHOLD_SEED_DEMO_MANDATE === "true",
+    storage: {
+      // Vercel's Upstash integration names these KV_REST_API_*; Upstash itself uses UPSTASH_REDIS_REST_*.
+      upstashUrl: process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || undefined,
+      upstashToken: process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || undefined,
+      prefix: process.env.CLAUSEHOLD_STORE_PREFIX ?? `clausehold:${network}`,
+    },
   };
 
   const parsed = ConfigSchema.safeParse(raw);

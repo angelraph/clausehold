@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
-import { open, readFile } from "node:fs/promises";
-import path from "node:path";
-import { config } from "../config.js";
+import { FileLogBackend, type LogBackend } from "../storage/backends.js";
+import { defaultLogBackend } from "../storage/index.js";
 
 export type AuditEventType =
   | "MANDATE_CREATED"
@@ -55,55 +53,45 @@ function hashEntry(e: Omit<AuditEntry, "hash">): string {
 }
 
 /**
- * Append-only, hash-chained audit log. One JSON object per line. Every
- * entry's hash depends on the previous entry's hash, so any tampering
- * with an earlier line breaks the chain from that point forward,
- * verifiable with `verify()` below.
+ * Append-only, hash-chained audit log. Every entry's hash depends on the
+ * previous entry's hash, so tampering with an earlier entry breaks the
+ * chain from that point on, which `verify()` detects. Entries live in a
+ * file on a machine, or in Upstash Redis on a serverless host.
  */
 export class AuditLog {
-  private readonly filePath: string;
+  private backendInstance?: LogBackend;
 
-  constructor(filePath: string = config.auditLogPath) {
-    this.filePath = filePath;
-    const dir = path.dirname(filePath);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  /** A file path (as before), a backend, or nothing for the configured default. */
+  constructor(private readonly target?: string | LogBackend) {}
+
+  private get backend(): LogBackend {
+    if (!this.backendInstance) {
+      this.backendInstance = typeof this.target === "string" ? new FileLogBackend(this.target) : (this.target ?? defaultLogBackend());
+    }
+    return this.backendInstance;
   }
 
   private async readAll(): Promise<AuditEntry[]> {
-    if (!existsSync(this.filePath)) return [];
-    const content = await readFile(this.filePath, "utf-8");
-    return content
-      .split("\n")
-      .filter((line) => line.trim().length > 0)
-      .map((line) => JSON.parse(line) as AuditEntry);
+    return (await this.backend.readAll()).map((line) => JSON.parse(line) as AuditEntry);
   }
 
   async append(type: AuditEventType, network: AuditEntry["network"], payload: unknown): Promise<AuditEntry> {
-    const entries = await this.readAll();
-    const last = entries[entries.length - 1];
-    const seq = last ? last.seq + 1 : 0;
-    const prevHash = last ? last.hash : GENESIS;
-    const timestamp = new Date().toISOString();
-
-    const withoutHash = { seq, timestamp, type, network, payload, prevHash };
-    const hash = hashEntry(withoutHash);
-    const entry: AuditEntry = { ...withoutHash, hash };
-
-    // Single-writer append with fsync so a crash mid-write can't corrupt prior lines.
-    const fh = await open(this.filePath, "a");
-    try {
-      await fh.appendFile(JSON.stringify(entry) + "\n", "utf-8");
-      await fh.sync();
-    } finally {
-      await fh.close();
+    // Optimistic: build the next entry from the current tail and append it only
+    // if nobody else appended in between. Otherwise re-read and try again.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const entries = await this.readAll();
+      const last = entries[entries.length - 1];
+      const seq = last ? last.seq + 1 : 0;
+      const prevHash = last ? last.hash : GENESIS;
+      const withoutHash = { seq, timestamp: new Date().toISOString(), type, network, payload, prevHash };
+      const entry: AuditEntry = { ...withoutHash, hash: hashEntry(withoutHash) };
+      if (await this.backend.appendIfLength(entries.length, JSON.stringify(entry))) return entry;
     }
-
-    return entry;
+    throw new Error("Audit log is under heavy concurrent writes; could not append after 8 attempts");
   }
 
   async tail(n = 20): Promise<AuditEntry[]> {
-    const entries = await this.readAll();
-    return entries.slice(-n);
+    return (await this.readAll()).slice(-n);
   }
 
   async all(): Promise<AuditEntry[]> {
