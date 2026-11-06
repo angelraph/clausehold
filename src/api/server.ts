@@ -36,7 +36,7 @@ import type { ClauseWriter } from "../near/clauseWriter.js";
 import { deriveDesk } from "../desk/view.js";
 import { OneClickError, assertQuoteFundsClause, buildClauseFundingQuote, findToken, type OneClickClient } from "../near/intents.js";
 import { RelayRefusedError, type RelayResult } from "../near/relayer.js";
-import { toBaseUnits } from "../near/network.js";
+import { assetFor, networkProfile, toBaseUnits } from "../near/network.js";
 
 /**
  * What the API needs from the outside world. Each is optional: a route whose
@@ -86,6 +86,7 @@ function isPublicRoute(method: string, path: string): boolean {
   if (method === "POST" && /^\/clauses\/[^/]+\/fund\/quote$/.test(path)) return true;
   if (method === "GET" && /^\/funding\/[^/]+$/.test(path)) return true;
   if (method === "POST" && path === "/relay") return true;
+  if (method === "GET" && path === "/network") return true;
   return false;
 }
 const HaltBodySchema = z.object({ reason: z.string().optional() });
@@ -445,7 +446,28 @@ export function createApp(deps: ApiDeps = {}): express.Express {
 
   const USDC_DECIMALS = 6;
 
+  // Which network this desk serves, so the web app can label it and build the right links.
+  app.get("/network", (_req: Request, res: Response) => {
+    const p = networkProfile();
+    res.json({ networkId: p.networkId, factoryAccountId: p.factoryAccountId, explorer: p.explorer, intents: p.intents, funding: p.funding, assets: p.assets });
+  });
+
   app.post("/clauses/:id/fund/quote", async (req: Request, res: Response) => {
+    const profile = networkProfile();
+    if (!profile.intents) {
+      const invite = await findInviteByProposal(req.params.id as string);
+      let token = "the test stablecoin";
+      try {
+        token = invite ? assetFor(profile, invite.proposal.asset).contractId : token;
+      } catch {
+        /* unknown asset: keep the generic wording */
+      }
+      res.status(409).json({
+        error: `NEAR Intents runs on mainnet only. On ${profile.networkId}, fund the clause by sending ${token} to ${invite?.clauseAccountId ?? "the clause account"} with ft_transfer.`,
+        funding: "direct-transfer",
+      });
+      return;
+    }
     if (!deps.oneClick) {
       res.status(503).json({ error: "Intents funding is not configured on this server" });
       return;

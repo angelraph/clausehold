@@ -10,8 +10,10 @@ const cfg = vi.hoisted(() => ({
   apiPort: 0,
   approvalTtlMinutes: 10,
   mandatesDir: "unused",
-  network: "testnet",
+  network: "testnet" as "testnet" | "mainnet",
   factoryAccountId: "clausehold.testnet",
+  nearRpcUrl: undefined as string | undefined,
+  webOrigins: [] as string[],
 }));
 
 const store = vi.hoisted(() => ({
@@ -155,7 +157,38 @@ describe("the editor's routes are public, and only those", () => {
   });
 });
 
+describe("GET /network", () => {
+  it("is public and says which network this desk serves", async () => {
+    await start({});
+    const res = await fetch(`${base}/network`);
+    const body = (await res.json()) as { networkId: string; factoryAccountId: string; intents: boolean; funding: string; assets: Array<{ contractId: string }> };
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ networkId: "testnet", factoryAccountId: "clausehold.testnet", intents: false, funding: "direct-transfer" });
+    expect(body.assets[0]!.contractId).toBe("musd.clausehold.testnet");
+  });
+});
+
+describe("funding on testnet", () => {
+  it("explains direct transfer instead of quoting Intents, which is mainnet only", async () => {
+    await start({ writer });
+    const { proposalId } = await openAndBind();
+    const res = await fetch(`${base}/clauses/${proposalId}/fund/quote`, { method: "POST", headers: json, body: JSON.stringify({ originAsset: "nep141:base-usdc", refundTo: "0x1" }) });
+    const body = (await res.json()) as { error: string; funding: string };
+    expect(res.status).toBe(409);
+    expect(body.funding).toBe("direct-transfer");
+    expect(body.error).toContain("musd.clausehold.testnet");
+    expect(body.error).toContain("r-104.clausehold.testnet");
+  });
+});
+
 describe("POST /clauses/:id/fund/quote", () => {
+  beforeEach(() => {
+    cfg.network = "mainnet";
+  });
+  afterEach(() => {
+    cfg.network = "testnet";
+  });
+
   const tokens = [{ assetId: "nep141:usdc.fake.near", decimals: 6, blockchain: "near", symbol: "USDC", price: 1, priceUpdatedAt: "" }];
 
   function oneClick(amountOut = "2000000"): OneClickClient {

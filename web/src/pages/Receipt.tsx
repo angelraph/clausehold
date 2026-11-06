@@ -1,7 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { PageHead } from "../components/Page";
-
-const EXPLORER = "https://testnet.nearblocks.io/address/";
+import { explorerAccount, useNetwork } from "../lib/network";
 
 /**
  * A public receipt. The record itself lives on chain as NEP-297 events
@@ -10,6 +9,7 @@ const EXPLORER = "https://testnet.nearblocks.io/address/";
  */
 export default function Receipt() {
   const { clause = "" } = useParams();
+  const { network } = useNetwork();
   return (
     <>
       <PageHead eyebrow="Public receipt" title={clause} soft="on NEAR." />
@@ -19,7 +19,7 @@ export default function Receipt() {
           <p className="muted" style={{ fontSize: 15 }}>
             Every clause emits a public event when it is funded, delivered, released or returned. This page reads those events; it is not the record. The chain is.
           </p>
-          <a className="btn btn-ghost btn-sm" href={`${EXPLORER}${encodeURIComponent(clause)}`} target="_blank" rel="noreferrer">Open in the explorer</a>
+          <a className="btn btn-ghost btn-sm" href={explorerAccount(network, clause)} target="_blank" rel="noreferrer">Open in the explorer</a>
         </div>
         <div className="card card-pad">
           <h2 className="h3">What a receipt shows</h2>

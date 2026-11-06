@@ -298,3 +298,12 @@ section { position: relative; }
 .steps { counter-reset: step; display: grid; gap: 16px; }
 .step { counter-increment: step; display: grid; grid-template-columns: 56px 1fr; gap: 20px; }
 .step::before { content: counter(step, decimal-leading-zero); font-family: var(--font-mono); color: var(--violet-2); font-size: 14px; padding-top: 4px; }
+
+/* Network switch */
+.netswitch { display: inline-flex; padding: 3px; border: 1px solid var(--line-strong); border-radius: 999px; background: rgba(255, 255, 255, 0.03); }
+.netswitch button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: none; color: var(--muted); font-size: 12.5px; cursor: pointer; }
+.netswitch button.on { background: var(--surface-2); color: var(--text); }
+.netswitch .dot { width: 6px; height: 6px; border-radius: 50%; }
+.netswitch .dot.testnet { background: var(--amber); }
+.netswitch .dot.mainnet { background: var(--green); }
+.nav-sheet .netswitch { margin: 12px 0 4px; align-self: flex-start; }

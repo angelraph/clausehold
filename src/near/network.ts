@@ -9,18 +9,76 @@ export interface NetworkInfo {
   explorerAccount: (accountId: string) => string;
 }
 
-const DEFAULTS: Record<NetworkId, { rpcUrl: string; explorer: string }> = {
-  mainnet: { rpcUrl: "https://free.rpc.fastnear.com", explorer: "https://nearblocks.io" },
-  testnet: { rpcUrl: "https://test.rpc.fastnear.com", explorer: "https://testnet.nearblocks.io" },
+/** A stablecoin a clause can hold: its NEP-141 contract and decimals. */
+export interface AssetProfile {
+  symbol: string;
+  contractId: string;
+  decimals: number;
+}
+
+/**
+ * Everything that differs between testnet and mainnet. The contracts are the
+ * same on both; only these addresses change. Testnet exists so anyone, judges
+ * included, can try every step without real money.
+ */
+export interface NetworkProfile {
+  networkId: NetworkId;
+  factoryAccountId: string;
+  rpcUrl: string;
+  explorer: string;
+  /** NEAR Intents (1Click) runs on mainnet only. */
+  intents: boolean;
+  /** How a clause on this network is funded. */
+  funding: "intents" | "direct-transfer";
+  assets: AssetProfile[];
+}
+
+export const NETWORK_PROFILES: Record<NetworkId, NetworkProfile> = {
+  testnet: {
+    networkId: "testnet",
+    factoryAccountId: "clausehold.testnet",
+    rpcUrl: "https://test.rpc.fastnear.com",
+    explorer: "https://testnet.nearblocks.io",
+    intents: false,
+    funding: "direct-transfer",
+    // A mock stablecoin anyone can mint for testing, deployed beside the factory.
+    assets: [{ symbol: "USDC", contractId: "musd.clausehold.testnet", decimals: 6 }],
+  },
+  mainnet: {
+    networkId: "mainnet",
+    factoryAccountId: "clausehold.near",
+    rpcUrl: "https://free.rpc.fastnear.com",
+    explorer: "https://nearblocks.io",
+    intents: true,
+    funding: "intents",
+    // Native USDC on NEAR. The Intents quote still checks this against 1Click's token list.
+    assets: [{ symbol: "USDC", contractId: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", decimals: 6 }],
+  },
 };
 
+/** The active network's profile, with the factory and RPC overrides from config applied. */
+export function networkProfile(networkId: NetworkId = config.network): NetworkProfile {
+  const base = NETWORK_PROFILES[networkId];
+  return {
+    ...base,
+    factoryAccountId: networkId === config.network ? config.factoryAccountId : base.factoryAccountId,
+    rpcUrl: networkId === config.network && config.nearRpcUrl ? config.nearRpcUrl : base.rpcUrl,
+  };
+}
+
+export function assetFor(profile: NetworkProfile, symbol: string): AssetProfile {
+  const a = profile.assets.find((x) => x.symbol.toUpperCase() === symbol.toUpperCase());
+  if (!a) throw new Error(`${symbol} is not available on ${profile.networkId}`);
+  return a;
+}
+
 export function networkInfo(networkId: NetworkId = config.network, rpcOverride: string | undefined = config.nearRpcUrl): NetworkInfo {
-  const d = DEFAULTS[networkId];
+  const p = NETWORK_PROFILES[networkId];
   return {
     networkId,
-    rpcUrl: rpcOverride ?? d.rpcUrl,
-    explorerTx: (hash) => `${d.explorer}/txns/${hash}`,
-    explorerAccount: (accountId) => `${d.explorer}/address/${accountId}`,
+    rpcUrl: rpcOverride ?? p.rpcUrl,
+    explorerTx: (hash) => `${p.explorer}/txns/${hash}`,
+    explorerAccount: (accountId) => `${p.explorer}/address/${accountId}`,
   };
 }
 

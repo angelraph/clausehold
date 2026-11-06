@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { Footer, Nav } from "./components/Chrome";
 import Landing from "./pages/Landing";
+import { NetworkProvider, useNetwork } from "./lib/network";
 import "./styles.css";
 
 // Each page is its own route and its own chunk, so nothing loads on top of the landing page.
@@ -25,11 +26,13 @@ function ScrollToTop() {
 }
 
 function App() {
+  const { network } = useNetwork();
   return (
     <BrowserRouter>
       <ScrollToTop />
       <Nav />
-      <main>
+      {/* Keyed by network, so every page reloads its data when the switch flips. */}
+      <main key={network.id}>
         <Suspense fallback={<div className="wrap page-head faint">Loading</div>}>
           <Routes>
             <Route path="/" element={<Landing />} />
@@ -54,6 +57,8 @@ function App() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <NetworkProvider>
+      <App />
+    </NetworkProvider>
   </StrictMode>
 );

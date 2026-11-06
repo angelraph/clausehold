@@ -1,10 +1,12 @@
+import { currentNetwork, NETWORKS } from "./network";
+
 /**
- * Talks to the Clausehold desk API (src/api/server.ts). The base URL comes
- * from VITE_API_BASE at build time, or from the desk's settings, stored in
- * this browser only. The agent key is also kept only in this browser.
+ * Talks to the Clausehold desk API (src/api/server.ts). Each network has its
+ * own desk API, chosen by the network switch. Settings, including the agent
+ * key, are kept per network and only in this browser.
  */
 
-const SETTINGS_KEY = "clausehold.settings";
+const settingsKey = () => `clausehold.settings.${currentNetwork()}`;
 
 export interface DeskSettings {
   apiBase: string;
@@ -14,26 +16,29 @@ export interface DeskSettings {
   buyer: string;
 }
 
-const DEFAULTS: DeskSettings = {
-  apiBase: (import.meta.env.VITE_API_BASE as string | undefined) ?? "http://localhost:4477",
-  apiKey: "",
-  agentId: "studio-agent",
-  mandateId: "b2f1e9a0-1a2b-4c3d-8e4f-000000000001",
-  buyer: "studio-agent.testnet",
-};
+function defaults(): DeskSettings {
+  const n = currentNetwork();
+  return {
+    apiBase: NETWORKS[n].apiBase,
+    apiKey: "",
+    agentId: "studio-agent",
+    mandateId: "b2f1e9a0-1a2b-4c3d-8e4f-000000000001",
+    buyer: n === "testnet" ? "studio-agent.testnet" : "",
+  };
+}
 
 export function loadSettings(): DeskSettings {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<DeskSettings>) } : DEFAULTS;
+    const raw = localStorage.getItem(settingsKey());
+    return raw ? { ...defaults(), ...(JSON.parse(raw) as Partial<DeskSettings>) } : defaults();
   } catch {
-    return DEFAULTS;
+    return defaults();
   }
 }
 
 export function saveSettings(s: DeskSettings): void {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    localStorage.setItem(settingsKey(), JSON.stringify(s));
   } catch {
     /* private mode: settings last for this page only */
   }

@@ -3,11 +3,13 @@ import { Link, useParams } from "react-router-dom";
 import { ApiDown, PageHead, shortDate, timeLeft } from "../components/Page";
 import { StatusChip } from "../components/Status";
 import { api, ApiError, statusOf, type DeskClause } from "../lib/api";
+import { useNetwork } from "../lib/network";
 
 const STEPS = ["awaiting", "open", "funded", "delivered", "released"] as const;
 
 export default function ClauseDetail() {
   const { id = "" } = useParams();
+  const { network } = useNetwork();
   const [row, setRow] = useState<DeskClause | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fund, setFund] = useState({ originAsset: "", refundTo: "" });
@@ -80,9 +82,23 @@ export default function ClauseDetail() {
         </div>
 
         <div className="card card-pad">
-          <h2 className="h3">Fund through NEAR Intents</h2>
-          <p className="muted" style={{ fontSize: 14 }}>Pay from the chain you already hold. The clause account receives exactly {p.amount.toFixed(2)} {p.asset} on NEAR.</p>
-          {status !== "open" ? (
+          <h2 className="h3">{network.intents ? "Fund through NEAR Intents" : "Fund with test money"}</h2>
+          <p className="muted" style={{ fontSize: 14 }}>
+            {network.intents
+              ? `Pay from the chain you already hold. The clause account receives exactly ${p.amount.toFixed(2)} ${p.asset} on NEAR.`
+              : `NEAR Intents runs on mainnet only. On testnet the clause holds a test stablecoin you can mint for free, sent straight to the clause account.`}
+          </p>
+          {status === "open" && !network.intents ? (
+            <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+              <pre className="code" style={{ margin: 0 }}>
+                <span className="c"># Send exactly the clause amount to the clause account</span>{"\n"}
+                near call {network.usdc} ft_transfer \{"\n"}
+                {"  "}<span className="s">{`'{"receiver_id":"${row.clauseAccountId}","amount":"${Math.round(p.amount * 1e6)}"}'`}</span> \{"\n"}
+                {"  "}--accountId {p.buyer} --depositYocto 1
+              </pre>
+              <p className="faint" style={{ fontSize: 13, margin: 0 }}>Then anyone can call sync_funding on the clause, or the desk does it for you, and the status turns Funded.</p>
+            </div>
+          ) : status !== "open" ? (
             <div className="notice" style={{ marginTop: 12 }}>{status === "awaiting" ? "Funding opens once the payee has opened their link and the clause is written." : "This clause is past funding."}</div>
           ) : (
             <div style={{ display: "grid", gap: 12, marginTop: 12 }}>

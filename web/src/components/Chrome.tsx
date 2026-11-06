@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { Logo } from "./Logo";
+import { NetworkSwitch } from "../lib/network";
 
 const LINKS = [
   { to: "/how-it-works", label: "How it works" },
@@ -28,6 +29,7 @@ export function Nav() {
           ))}
         </nav>
         <div className="nav-cta">
+          <NetworkSwitch />
           <Link className="btn btn-ghost btn-sm" to="/desk">
             Open the desk
           </Link>
@@ -42,6 +44,7 @@ export function Nav() {
         </button>
       </div>
       <div className={`nav-sheet wrap ${open ? "open" : ""}`}>
+        <NetworkSwitch />
         {LINKS.map((l) => (
           <Link key={l.to} to={l.to}>
             {l.label}
