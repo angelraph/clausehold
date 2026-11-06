@@ -69,16 +69,15 @@ pub async fn relay(
     inner: Inner,
     relayer: &Account,
 ) -> Result<RelayOutcome> {
-    let client = JsonRpcClient::connect(env.worker.rpc_addr());
+    let client = JsonRpcClient::connect(env.rpc_addr());
     let sender_id = pid(sender.as_str());
     let worker_signer: Signer = near_crypto::InMemorySigner::from_secret_key(sender_id.clone(), csk(worker_sk));
     let relayer_id = pid(relayer.id().as_str());
     let relayer_signer: Signer =
         near_crypto::InMemorySigner::from_secret_key(relayer_id.clone(), csk(relayer.secret_key()));
 
-    let block = env.worker.view_block().await?;
-    let block_hash = CryptoHash(block.hash().0);
-    let height = block.height();
+    let (height, hash, _) = env.block().await?;
+    let block_hash = CryptoHash(hash);
 
     let action = match inner {
         Inner::Call { method, args } => Action::FunctionCall(Box::new(FunctionCallAction {

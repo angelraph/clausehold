@@ -1,3 +1,4 @@
+#![allow(unused_must_use)]
 //! near-workspaces sandbox tests: factory + clause + mock NEP-141.
 //! Build the wasm first (contracts/README.md), then `cargo test -p sandbox-tests`.
 
@@ -11,17 +12,17 @@ use near_workspaces::Account;
 use serde_json::{json, Value};
 
 fn worker_account(env: &Env, c: &Created) -> Account {
-    Account::from_secret_key(c.account.clone(), c.worker_sk.clone(), &env.worker)
+    env.account_with_key(c.account.clone(), c.worker_sk.clone())
 }
 
 #[tokio::test]
 async fn happy_path_relayed_delivery_releases_in_same_call() -> Result<()> {
     let env = setup().await?;
     let c = create_clause(&env, env.payee.id(), 2 * USDC, 900, 0).await?.expect("create");
-    assert_eq!(c.account.as_str(), "r-0.clausehold.test.near");
+    assert_eq!(c.account.as_str(), format!("r-0.{}", env.factory.id()));
 
     // Exactly one access key: a function-call key for submit_delivery on r-0.
-    let keys = env.worker.view_access_keys(&c.account).await?;
+    let keys = env.access_keys(&c.account).await?;
     assert_eq!(keys.len(), 1, "exactly one key: {keys:?}");
     assert_eq!(keys[0].public_key, c.worker_sk.public_key());
     match &keys[0].access_key.permission {
@@ -363,5 +364,31 @@ async fn record_outcome_only_from_own_clause() -> Result<()> {
     let s: Value = env.factory.view("standing").args_json(json!({ "account_id": env.payee.id() })).await?.json()?;
     assert_eq!(s["as_payee"]["released"], 0);
     let _ = c;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_token_faucet_registers_and_caps() -> Result<()> {
+    let env = setup().await?;
+    // A fresh account that was never registered on the FT.
+    let r = ok(call0(&env.stranger, env.ft.id(), "faucet").await?)?;
+    let minted: String = r.json()?;
+    assert_eq!(minted, "20000000");
+    assert_eq!(balance(&env, env.stranger.id()).await?, 20 * USDC);
+    // Calling again tops up to the cap only.
+    let r = ok(call0(&env.stranger, env.ft.id(), "faucet").await?)?;
+    let minted: String = r.json()?;
+    assert_eq!(minted, "0");
+    // The faucet balance funds a clause like any other.
+    let c = create_clause(&env, env.payee.id(), 2 * USDC, 900, 0).await?.expect("create");
+    ok(env
+        .stranger
+        .call(env.ft.id(), "ft_transfer_call")
+        .args_json(json!({ "receiver_id": c.account, "amount": (2 * USDC).to_string(), "msg": "" }))
+        .deposit(near_workspaces::types::NearToken::from_yoctonear(1))
+        .max_gas()
+        .transact()
+        .await?)?;
+    assert_eq!(state(&env, &c.account).await?, "funded");
     Ok(())
 }

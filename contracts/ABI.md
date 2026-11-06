@@ -105,6 +105,20 @@ Yes: the relayer must accept exactly
 `SignedDelegate { delegate_action: { sender_id: r-<n>, receiver_id: r-<n>, actions: [FunctionCall { method_name: "submit_delivery", args: {hash, note_hash?}, gas ≥ 150 Tgas, deposit: 0 }], public_key: <the clause's worker_pk>, nonce, max_block_height } }`.
 Only one action. `sender_id == receiver_id == r-<n>.<factory>`, deposit 0. Anything else fails on chain anyway: the FC key restricts receiver and method, and NEAR rejects a non-zero deposit from an FC key. Validating it up front just saves the relayer's gas. The relayer's outer tx: `signer = relayer`, `receiver = r-<n>`, `actions = [Delegate]`. Suggested extra check: `public_key == get_clause().worker_pk` and `get_state() == "funded"`.
 
+## Test stablecoin (testnet only): `musd.clausehold.testnet`
+
+A NEP-141 + NEP-145 token, symbol `mUSD`, **6 decimals**. Deployed by `./deploy.sh testnet`. Never deployed on mainnet.
+
+| method | args | deposit | gas | caller | returns |
+|---|---|---|---|---|---|
+| `faucet` | `{}` | **0** | 30 Tgas | **anyone** | U128 minted |
+| `mint` | `{account_id, amount: U128}` | 0 | 30 Tgas | anyone (test helper; prefer `faucet` in UI) | — |
+| `ft_transfer` / `ft_transfer_call` | NEP-141 | 1 yocto | 30 / 150 Tgas | holder | NEP-141 |
+| `storage_deposit` | NEP-145 | 0.00125 NEAR | 30 Tgas | anyone | `{total, available}` |
+| views | `ft_balance_of {account_id}`, `ft_metadata`, `ft_total_supply`, `storage_balance_of {account_id}`, `storage_balance_bounds` | | | | |
+
+`faucet()` registers the caller if needed (the token pays the storage) and tops the caller's balance up to **20 mUSD (`"20000000"`)**. It returns how much it minted, which is `"0"` if the caller is already at the cap. The caller needs a NEAR account with a little NEAR for gas. Judges can create one with the testnet faucet and wallet.
+
 ## NEP-297 events
 
 Format: `EVENT_JSON:{"standard":"clausehold","version":"1.0.0","event":"<name>","data":[{...}]}` (data is always a 1-element array).

@@ -5,8 +5,14 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# Downloads the Linux/macOS neard sandbox binary at build time.
+# Testnet-only runs (e.g. on Windows) use --no-default-features.
+default = ["sandbox"]
+sandbox = ["near-workspaces/install"]
+
 [dev-dependencies]
-near-workspaces = "0.24"
+near-workspaces = { version = "0.24", default-features = false, features = ["rustls"] }
 near-primitives = "0.38"
 near-crypto = "0.38"
 near-jsonrpc-client = "0.23"

@@ -6,7 +6,7 @@ Rust, near-sdk 5.30. One cargo workspace:
 |---|---|
 | `factory` | `clausehold.near` / `clausehold.testnet`. Holds the mandate, creates clauses, keeps receipts and standing. |
 | `clause` | One escrow per job at `r-<n>.<factory>`. Deployed by the factory, never by hand. |
-| `mock-ft` | Test-only NEP-141 with open `mint` and failure switches. Testnet demo token. Never on mainnet. |
+| `mock-ft` | Test-only NEP-141 (`mUSD`, 6 decimals) with a public `faucet()` (20 mUSD per account), open `mint` and failure switches. Testnet demo token. Never on mainnet. |
 | `sandbox-tests` | near-workspaces tests that run all three in a local sandbox. |
 
 ## How the money moves
@@ -70,7 +70,38 @@ The unit tests cover every guard and callback. The sandbox tests start a local `
 
 Set `CLAUSEHOLD_WASM_DIR` if the wasm lives somewhere other than `target/near`.
 
-## Deploy to testnet
+### Same tests on NEAR testnet (no funds, no Linux)
+
+```bash
+cd contracts && CLAUSEHOLD_NETWORK=testnet cargo test -p sandbox-tests --no-default-features -- --test-threads=1
+```
+
+This runs the same suite against the public testnet. Each test creates three faucet-funded dev accounts, deploys fresh copies of the factory, clause and test FT, and runs the flow on chain, including the relayed NEP-366 delivery. Deadline and challenge-window tests wait in real time instead of fast-forwarding, so a full run takes several minutes. `--no-default-features` skips the build-time download of the local `neard` sandbox binary, which has no Windows build. The default `cargo test` still downloads it and runs the local sandbox suite. On Windows, add `AWS_LC_SYS_PREBUILT_NASM=1` if NASM is not installed.
+
+## Networks
+
+Both networks are live and run the same wasm:
+
+| | testnet | mainnet |
+|---|---|---|
+| factory | `clausehold.testnet` | `clausehold.near` |
+| asset | `musd.clausehold.testnet` (mock FT, anyone can mint) | native USDC `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1` |
+| funding | `ft_transfer_call`, or `ft_transfer` + `sync_funding` | NEAR Intents 1Click, then `sync_funding` |
+| cost | free (faucet NEAR) | real NEAR for storage, plus a little USDC |
+
+Testnet is the path for judges and anyone without funds. One script deploys either:
+
+```bash
+cd contracts && ./build.sh && ./deploy.sh testnet
+```
+
+```bash
+cd contracts && CONFIRM=mainnet ./deploy.sh mainnet
+```
+
+`deploy.sh` deploys the factory, uploads the clause wasm, deploys the test FT (testnet only) and sets the mandate. Set `DAO=<sputnik dao account>` to hand ownership to the DAO at the end. The step-by-step commands below do the same by hand.
+
+## Deploy to testnet by hand
 
 These commands use [near-cli-rs](https://github.com/near/near-cli-rs) (`near`). `$ME` is your testnet account, which signs the setup.
 

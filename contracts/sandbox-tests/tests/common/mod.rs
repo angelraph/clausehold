@@ -4,7 +4,7 @@
 pub mod relay;
 
 use anyhow::{anyhow, Result};
-use near_workspaces::network::Sandbox;
+use near_workspaces::network::{Sandbox, Testnet};
 use near_workspaces::result::ExecutionFinalResult;
 use near_workspaces::types::{KeyType, NearToken, SecretKey};
 use near_workspaces::{Account, AccountId, Contract, Worker};
@@ -28,8 +28,29 @@ pub fn wasm(name: &str) -> Vec<u8> {
     })
 }
 
+/// Where the tests run. `CLAUSEHOLD_NETWORK=testnet` uses the public NEAR
+/// testnet (faucet-funded dev accounts, no Linux needed, real waits instead of
+/// fast-forward). Anything else uses a local sandbox.
+pub enum Net {
+    Sandbox(Worker<Sandbox>),
+    Testnet(Worker<Testnet>),
+}
+
+macro_rules! with_worker {
+    ($net:expr, |$w:ident| $body:expr) => {
+        match $net {
+            Net::Sandbox($w) => $body,
+            Net::Testnet($w) => $body,
+        }
+    };
+}
+
+pub fn on_testnet() -> bool {
+    std::env::var("CLAUSEHOLD_NETWORK").map(|v| v == "testnet").unwrap_or(false)
+}
+
 pub struct Env {
-    pub worker: Worker<Sandbox>,
+    pub net: Net,
     pub factory: Contract,
     pub ft: Contract,
     pub dao: Account,
@@ -54,31 +75,39 @@ pub fn mandate(ft: &AccountId, cosigner: &AccountId) -> Value {
     })
 }
 
+async fn sub(parent: &Account, name: &str, near: NearToken) -> Result<Account> {
+    parent
+        .create_subaccount(name)
+        .initial_balance(near)
+        .transact()
+        .await?
+        .into_result()
+        .map_err(|e| anyhow!("create {name}: {e:?}"))
+}
+
 pub async fn setup() -> Result<Env> {
-    let worker = near_workspaces::sandbox().await?;
-    let root = worker.root_account()?;
-
-    let mk = |name: &'static str, near: u128| {
-        let root = root.clone();
-        async move {
-            root.create_subaccount(name)
-                .initial_balance(NearToken::from_near(near))
-                .transact()
-                .await?
-                .into_result()
-                .map_err(|e| anyhow!("create {name}: {e:?}"))
-        }
+    let (net, factory_acc, ft_acc, desk, small) = if on_testnet() {
+        // Three faucet-funded dev accounts (~10 NEAR each). Everyone else is
+        // a cheap sub-account of the desk.
+        let w = near_workspaces::testnet().await?;
+        let factory_acc = w.dev_create_account().await?;
+        let ft_acc = w.dev_create_account().await?;
+        let desk = w.dev_create_account().await?;
+        (Net::Testnet(w), factory_acc, ft_acc, desk, NearToken::from_millinear(300))
+    } else {
+        let w = near_workspaces::sandbox().await?;
+        let root = w.root_account()?;
+        let factory_acc = sub(&root, "clausehold", NearToken::from_near(60)).await?;
+        let ft_acc = sub(&root, "usdc", NearToken::from_near(20)).await?;
+        let desk = sub(&root, "desk", NearToken::from_near(60)).await?;
+        (Net::Sandbox(w), factory_acc, ft_acc, desk, NearToken::from_near(20))
     };
-
-    let factory_acc = mk("clausehold", 60).await?;
-    let ft_acc = mk("usdc", 20).await?;
-    let dao = mk("dao", 20).await?;
-    let desk = mk("desk", 60).await?;
-    let buyer = mk("buyer", 20).await?;
-    let payee = mk("payee", 20).await?;
-    let relayer = mk("relayer", 20).await?;
-    let cosigner = mk("cosigner", 20).await?;
-    let stranger = mk("stranger", 20).await?;
+    let dao = sub(&desk, "dao", small).await?;
+    let buyer = sub(&desk, "buyer", small).await?;
+    let payee = sub(&desk, "payee", small).await?;
+    let relayer = sub(&desk, "relayer", small).await?;
+    let cosigner = sub(&desk, "cosigner", small).await?;
+    let stranger = sub(&desk, "stranger", small).await?;
 
     let ft = ft_acc.deploy(&wasm("mock-ft")).await?.into_result()?;
     ok(ft.call("new").transact().await?)?;
@@ -101,7 +130,36 @@ pub async fn setup() -> Result<Env> {
         .transact()
         .await?)?;
 
-    Ok(Env { worker, factory, ft, dao, desk, buyer, payee, relayer, cosigner, stranger })
+    Ok(Env { net, factory, ft, dao, desk, buyer, payee, relayer, cosigner, stranger })
+}
+
+impl Env {
+    pub fn rpc_addr(&self) -> String {
+        match &self.net {
+            Net::Sandbox(w) => w.rpc_addr(),
+            Net::Testnet(_) => std::env::var("CLAUSEHOLD_TESTNET_RPC")
+                .unwrap_or_else(|_| near_workspaces::network::testnet::RPC_URL.to_string()),
+        }
+    }
+
+    /// (height, hash bytes, timestamp ns) of the latest block.
+    pub async fn block(&self) -> Result<(u64, [u8; 32], u64)> {
+        let b = with_worker!(&self.net, |w| w.view_block().await?);
+        Ok((b.height(), b.hash().0, b.timestamp()))
+    }
+
+    pub async fn view_json(&self, contract: &AccountId, method: &str, args: Value) -> Result<Value> {
+        Ok(with_worker!(&self.net, |w| w.view(contract, method).args_json(args).await?.json()?))
+    }
+
+    pub async fn access_keys(&self, id: &AccountId) -> Result<Vec<near_workspaces::types::AccessKeyInfo>> {
+        Ok(with_worker!(&self.net, |w| w.view_access_keys(id).await?))
+    }
+
+    /// An account that signs with `sk` (e.g. the clause's worker FC key).
+    pub fn account_with_key(&self, id: AccountId, sk: SecretKey) -> Account {
+        with_worker!(&self.net, |w| Account::from_secret_key(id, sk, w))
+    }
 }
 
 pub fn ok(r: ExecutionFinalResult) -> Result<ExecutionFinalResult> {
@@ -127,7 +185,7 @@ pub struct Created {
 }
 
 pub async fn now_secs(env: &Env) -> Result<u64> {
-    Ok(env.worker.view_block().await?.timestamp() / SEC)
+    Ok(env.block().await?.2 / SEC)
 }
 
 pub async fn create_clause(
@@ -166,7 +224,7 @@ pub async fn create_clause(
 }
 
 pub async fn clause_view(env: &Env, clause: &AccountId) -> Result<Value> {
-    Ok(env.worker.view(clause, "get_clause").await?.json()?)
+    env.view_json(clause, "get_clause", json!({})).await
 }
 
 pub async fn state(env: &Env, clause: &AccountId) -> Result<String> {
@@ -221,12 +279,16 @@ pub async fn set_fail_transfers(env: &Env, fail: bool) -> Result<()> {
     Ok(())
 }
 
-/// Advance the chain until block time is at least `secs` later.
+/// Advance the chain until block time is at least `secs` later. Sandbox
+/// fast-forwards; testnet just waits.
 pub async fn advance_secs(env: &Env, secs: u64) -> Result<()> {
-    let target = env.worker.view_block().await?.timestamp() + secs * SEC;
-    for _ in 0..50 {
-        env.worker.fast_forward(200).await?;
-        if env.worker.view_block().await?.timestamp() >= target {
+    let target = env.block().await?.2 + secs * SEC;
+    for _ in 0..120 {
+        match &env.net {
+            Net::Sandbox(w) => w.fast_forward(200).await?,
+            Net::Testnet(_) => tokio::time::sleep(std::time::Duration::from_secs(5)).await,
+        }
+        if env.block().await?.2 >= target {
             return Ok(());
         }
     }
