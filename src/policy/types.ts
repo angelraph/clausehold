@@ -1,30 +1,37 @@
 import { z } from "zod";
 
-export const ProposalSchema = z
+/**
+ * What a buyer (a person, a DAO, or an agent) asks Clausehold to write: pay
+ * `payee` `amount` of `asset` once `terms` are met, before `deadline`, or
+ * return it to the buyer. Checked against the mandate before anyone signs.
+ */
+export const ClauseProposalSchema = z
   .object({
     id: z.string().uuid(),
     agentId: z.string().min(1),
     mandateId: z.string().uuid(),
-    symbol: z.string().min(1),
-    side: z.enum(["BUY", "SELL"]),
-    type: z.enum(["MARKET", "LIMIT"]),
-    quantity: z.number().positive().optional(),
-    quoteOrderQty: z.number().positive().optional(),
-    limitPrice: z.number().positive().optional(),
-    reason: z.string().optional(),
+    /** NEAR account that funds the clause and receives the return on expiry. */
+    buyer: z.string().min(2),
+    /** NEAR account (named or implicit) that is paid on release. */
+    payee: z.string().min(2),
+    asset: z.string().min(1),
+    amount: z.number().positive(),
+    /** Plain-language terms. Their hash is written on chain. */
+    terms: z.string().min(1).max(2000),
+    deadline: z.string().datetime(),
+    /** Seconds after delivery during which the buyer may freeze. 0 releases at once. */
+    challengeSecs: z.number().int().min(0).default(0),
     submittedAt: z.string().datetime(),
   })
   .superRefine((p, ctx) => {
-    if (p.type === "MARKET" && p.quoteOrderQty === undefined && p.quantity === undefined) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A MARKET proposal needs a USD amount (quoteOrderQty) or a quantity" });
+    if (new Date(p.deadline).getTime() <= new Date(p.submittedAt).getTime()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["deadline"], message: "deadline must be after submittedAt" });
     }
-    if (p.type === "LIMIT") {
-      if (p.quantity === undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A LIMIT proposal needs a quantity" });
-      if (p.limitPrice === undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A LIMIT proposal needs a limitPrice" });
-      if (p.quoteOrderQty !== undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A LIMIT proposal is sized by quantity, not a USD amount" });
+    if (p.payee === p.buyer) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["payee"], message: "payee must differ from buyer" });
     }
   });
-export type Proposal = z.infer<typeof ProposalSchema>;
+export type ClauseProposal = z.infer<typeof ClauseProposalSchema>;
 
 export type RuleOutcome = "ok" | "violated" | "warning";
 
@@ -36,28 +43,13 @@ export interface RuleResult {
 
 export type VerdictDecision = "PASS" | "VETO" | "ESCALATE";
 
-export interface SimulationResult {
-  venue: string;
-  referencePrice: number;
-  projectedFillPrice: number;
-  projectedSlippageBps: number;
-  notionalUsd: number;
-  projectedNavImpactPct: number;
-  orderBookDepthSampledAt: string;
-  /** True when the sampled order-book depth couldn't fully cover notionalUsd. When true, projectedFillPrice/projectedSlippageBps describe only the fillable portion and understate the real impact. */
-  liquidityInsufficient: boolean;
-  /** Notional not coverable by the sampled depth; 0 when fully covered. Only meaningful for MARKET. */
-  unfilledUsd: number;
-  /** LIMIT only: notional that would not fill at once and would rest on the book at the limit price. */
-  restingUsd: number;
-}
-
 export interface Verdict {
   id: string;
   proposalId: string;
   decision: VerdictDecision;
   reasons: RuleResult[];
-  simulation: SimulationResult;
+  amount: number;
+  asset: string;
   decidedAt: string;
   policyVersion: number;
 }

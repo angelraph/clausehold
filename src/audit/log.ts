@@ -7,15 +7,16 @@ import { config } from "../config.js";
 export type AuditEventType =
   | "MANDATE_CREATED"
   | "MANDATE_UPDATED"
-  | "NAV_SNAPSHOT"
-  | "PROPOSAL_RECEIVED"
+  | "CLAUSE_PROPOSED"
   | "VERDICT_ISSUED"
-  | "EXECUTION_ATTEMPTED"
-  | "EXECUTION_CONFIRMED"
-  | "EXECUTION_FILLED"
-  | "EXECUTION_PLACED"
-  | "ORDER_CANCELLED"
-  | "EXECUTION_REJECTED_BY_PLATFORM"
+  | "CLAUSE_REFUSED"
+  | "CLAUSE_CLEARED"
+  | "CLAUSE_CREATED"
+  | "CLAUSE_FUNDED"
+  | "CLAUSE_DELIVERED"
+  | "CLAUSE_RELEASED"
+  | "CLAUSE_RETURNED"
+  | "CLAUSE_FROZEN"
   | "APPROVAL_REQUESTED"
   | "APPROVAL_GRANTED"
   | "APPROVAL_REJECTED"
@@ -29,7 +30,8 @@ export interface AuditEntry {
   seq: number;
   timestamp: string;
   type: AuditEventType;
-  venue: "testnet" | "mainnet-mcp" | "n/a";
+  /** The NEAR network the event concerns, or "n/a" for off-chain events. */
+  network: "testnet" | "mainnet" | "n/a";
   payload: unknown;
   prevHash: string;
   hash: string;
@@ -42,7 +44,7 @@ function hashEntry(e: Omit<AuditEntry, "hash">): string {
     seq: e.seq,
     timestamp: e.timestamp,
     type: e.type,
-    venue: e.venue,
+    network: e.network,
     payload: e.payload,
     prevHash: e.prevHash,
   });
@@ -73,14 +75,14 @@ export class AuditLog {
       .map((line) => JSON.parse(line) as AuditEntry);
   }
 
-  async append(type: AuditEventType, venue: AuditEntry["venue"], payload: unknown): Promise<AuditEntry> {
+  async append(type: AuditEventType, network: AuditEntry["network"], payload: unknown): Promise<AuditEntry> {
     const entries = await this.readAll();
     const last = entries[entries.length - 1];
     const seq = last ? last.seq + 1 : 0;
     const prevHash = last ? last.hash : GENESIS;
     const timestamp = new Date().toISOString();
 
-    const withoutHash = { seq, timestamp, type, venue, payload, prevHash };
+    const withoutHash = { seq, timestamp, type, network, payload, prevHash };
     const hash = hashEntry(withoutHash);
     const entry: AuditEntry = { ...withoutHash, hash };
 
@@ -117,7 +119,7 @@ export class AuditLog {
         seq: entry.seq,
         timestamp: entry.timestamp,
         type: entry.type,
-        venue: entry.venue,
+        network: entry.network,
         payload: entry.payload,
         prevHash: entry.prevHash,
       });

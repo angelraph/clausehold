@@ -9,18 +9,20 @@ const cfg = vi.hoisted(() => ({
   apiPort: 0,
   approvalTtlMinutes: 10,
   mandatesDir: "unused",
+  network: "testnet",
+  factoryAccountId: "clausehold.testnet",
 }));
 
 const auditStore = vi.hoisted(() => ({
-  entries: [] as Array<{ seq: number; timestamp: string; type: string; venue: string; payload: unknown; prevHash: string; hash: string }>,
+  entries: [] as Array<{ seq: number; timestamp: string; type: string; network: string; payload: unknown; prevHash: string; hash: string }>,
 }));
 
 vi.mock("../src/config.js", () => ({ config: cfg }));
 vi.mock("../src/audit/log.js", () => ({
   auditLog: {
     tail: vi.fn(async () => []),
-    append: vi.fn(async (type: string, venue: string, payload: unknown) => {
-      const e = { seq: auditStore.entries.length, timestamp: new Date().toISOString(), type, venue, payload, prevHash: "x", hash: "y" };
+    append: vi.fn(async (type: string, network: string, payload: unknown) => {
+      const e = { seq: auditStore.entries.length, timestamp: new Date().toISOString(), type, network, payload, prevHash: "x", hash: "y" };
       auditStore.entries.push(e);
       return e;
     }),
@@ -28,15 +30,8 @@ vi.mock("../src/audit/log.js", () => ({
     verify: vi.fn(),
   },
 }));
-vi.mock("../src/venues/index.js", () => ({ activeVenue: { name: "testnet" }, marketDataBaseUrl: () => "x" }));
-vi.mock("../src/policy/assess.js", () => ({ assessProposal: vi.fn() }));
-vi.mock("../src/execution/adapter.js", () => ({ executeProposal: vi.fn() }));
-vi.mock("../src/policy/runProposal.js", () => ({ runProposal: vi.fn() }));
-vi.mock("../src/execution/orders.js", () => ({
-  listOpenCharterOrders: vi.fn(async () => [{ orderId: "1", symbol: "BTCUSDT" }]),
-  cancelCharterOrder: vi.fn(),
-  cancelAllCharterOrders: vi.fn(async () => ({ cancelled: [{}, {}], failed: [] })),
-}));
+vi.mock("../src/policy/assess.js", () => ({ assessClause: vi.fn() }));
+vi.mock("../src/policy/runClause.js", () => ({ runClause: vi.fn() }));
 vi.mock("../src/approval/service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/approval/service.js")>();
   return {
@@ -52,7 +47,7 @@ vi.mock("../src/approval/service.js", async (importOriginal) => {
 });
 
 import { startApiServer } from "../src/api/server.js";
-import { runProposal } from "../src/policy/runProposal.js";
+import { runClause } from "../src/policy/runClause.js";
 import * as service from "../src/approval/service.js";
 
 let server: Server;
@@ -73,32 +68,34 @@ beforeEach(() => {
   cfg.approverKey = "approver-key";
   cfg.requireAgentKeys = false;
   auditStore.entries.length = 0;
-  vi.mocked(runProposal).mockReset();
+  vi.mocked(runClause).mockReset();
 });
 
-const AGENT = { "X-Charter-Api-Key": "agent-key" };
-const APPROVER = { "X-Charter-Approver-Key": "approver-key", "X-Charter-Approver": "alice" };
+const AGENT = { "X-Clausehold-Api-Key": "agent-key" };
+const APPROVER = { "X-Clausehold-Approver-Key": "approver-key", "X-Clausehold-Approver": "alice" };
 const json = { "Content-Type": "application/json" };
 const uuid = "00000000-0000-0000-0000-000000000001";
-const proposeBody = JSON.stringify({ agentId: "a", mandateId: uuid, symbol: "BTCUSDT", side: "BUY", usd: 15 });
+const clauseFields = { buyer: "studio.testnet", payee: "editor.testnet", asset: "USDC", amount: 2, terms: "Cut intro to 30s", deadlineMinutes: 15 };
+const proposeBody = JSON.stringify({ agentId: "a", mandateId: uuid, ...clauseFields });
 
 describe("agent credential", () => {
   it("rejects a proposal without the agent key", async () => {
-    const res = await fetch(`${base}/propose`, { method: "POST", headers: json, body: proposeBody });
+    const res = await fetch(`${base}/clauses`, { method: "POST", headers: json, body: proposeBody });
     expect(res.status).toBe(401);
   });
 
   it("accepts a proposal with the agent key and returns the approval when escalated", async () => {
-    vi.mocked(runProposal).mockResolvedValue({
+    vi.mocked(runClause).mockResolvedValue({
       proposal: { id: "p1" },
       verdict: { decision: "ESCALATE" },
+      cleared: false,
       approval: { approvalId: "ap1", expiresAt: "later" },
     } as never);
-    const res = await fetch(`${base}/propose`, { method: "POST", headers: { ...json, ...AGENT }, body: proposeBody });
+    const res = await fetch(`${base}/clauses`, { method: "POST", headers: { ...json, ...AGENT }, body: proposeBody });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { approval: { approvalId: string }; execution: unknown };
+    const body = (await res.json()) as { approval: { approvalId: string }; cleared: boolean };
     expect(body.approval.approvalId).toBe("ap1");
-    expect(body.execution).toBeNull();
+    expect(body.cleared).toBe(false);
   });
 });
 
@@ -112,7 +109,7 @@ describe("approver credential", () => {
   it("a wrong approver key is refused", async () => {
     const res = await fetch(`${base}/approvals/x/approve`, {
       method: "POST",
-      headers: { ...json, "X-Charter-Approver-Key": "nope", "X-Charter-Approver": "alice" },
+      headers: { ...json, "X-Clausehold-Approver-Key": "nope", "X-Clausehold-Approver": "alice" },
       body: "{}",
     });
     expect(res.status).toBe(401);
@@ -121,7 +118,7 @@ describe("approver credential", () => {
   it("requires the approver to name themselves", async () => {
     const res = await fetch(`${base}/approvals/x/approve`, {
       method: "POST",
-      headers: { ...json, "X-Charter-Approver-Key": "approver-key" },
+      headers: { ...json, "X-Clausehold-Approver-Key": "approver-key" },
       body: "{}",
     });
     expect(res.status).toBe(400);
@@ -139,7 +136,7 @@ describe("approver credential", () => {
   });
 
   it("passes the named approver and note through to the service", async () => {
-    vi.mocked(service.approve).mockResolvedValue({ record: { status: "granted" }, verdict: {}, execution: { orderId: "1" } } as never);
+    vi.mocked(service.approve).mockResolvedValue({ record: { status: "granted" }, verdict: {} } as never);
     const res = await fetch(`${base}/approvals/ap1/approve`, { method: "POST", headers: { ...json, ...APPROVER }, body: JSON.stringify({ note: "ok" }) });
     expect(res.status).toBe(200);
     expect(service.approve).toHaveBeenCalledWith("ap1", "alice", "ok");
@@ -198,15 +195,15 @@ describe("kill switch endpoints", () => {
 
   it("halts with the named operator and reason", async () => {
     vi.mocked(service.engageKillSwitch).mockResolvedValue({ engaged: true } as never);
-    const res = await fetch(`${base}/control/halt`, { method: "POST", headers: { ...json, ...APPROVER }, body: JSON.stringify({ reason: "odd fills" }) });
+    const res = await fetch(`${base}/control/halt`, { method: "POST", headers: { ...json, ...APPROVER }, body: JSON.stringify({ reason: "payee spree" }) });
     expect(res.status).toBe(200);
-    expect(service.engageKillSwitch).toHaveBeenCalledWith("alice", "odd fills");
+    expect(service.engageKillSwitch).toHaveBeenCalledWith("alice", "payee spree");
   });
 });
 
 describe("error responses", () => {
   it("malformed JSON is a clean 400 with no stack trace or file paths", async () => {
-    const res = await fetch(`${base}/propose`, { method: "POST", headers: { ...json, ...AGENT }, body: "{ not json" });
+    const res = await fetch(`${base}/clauses`, { method: "POST", headers: { ...json, ...AGENT }, body: "{ not json" });
     expect(res.status).toBe(400);
     const text = await res.text();
     expect(JSON.parse(text).error).toMatch(/not valid JSON/);
@@ -219,10 +216,10 @@ describe("per-agent keys", () => {
   const mandateA = "00000000-0000-0000-0000-00000000000a";
   const mandateB = "00000000-0000-0000-0000-00000000000b";
   const bodyFor = (mandateId: string, extra: Record<string, unknown> = {}) =>
-    JSON.stringify({ mandateId, symbol: "BTCUSDT", side: "BUY", usd: 15, ...extra });
+    JSON.stringify({ mandateId, ...clauseFields, ...extra });
 
   const proposed = (agentId: string) =>
-    ({ proposal: { id: "p-" + agentId, agentId }, verdict: { decision: "PASS" } }) as never;
+    ({ proposal: { id: "p-" + agentId, agentId }, verdict: { decision: "PASS" }, cleared: true }) as never;
 
   async function agentWithKey(agentId: string, mandateIds: string[]) {
     const { registerAgent } = await import("../src/agents/service.js");
@@ -231,43 +228,43 @@ describe("per-agent keys", () => {
 
   it("takes the agent's identity from its key, not from the request body", async () => {
     const key = await agentWithKey("alpha", [mandateA]);
-    vi.mocked(runProposal).mockResolvedValue(proposed("alpha"));
+    vi.mocked(runClause).mockResolvedValue(proposed("alpha"));
 
-    const res = await fetch(`${base}/propose`, { method: "POST", headers: { ...json, "X-Charter-Api-Key": key }, body: bodyFor(mandateA) });
+    const res = await fetch(`${base}/clauses`, { method: "POST", headers: { ...json, "X-Clausehold-Api-Key": key }, body: bodyFor(mandateA) });
     expect(res.status).toBe(200);
-    expect(vi.mocked(runProposal).mock.calls[0]![0].agentId).toBe("alpha");
+    expect(vi.mocked(runClause).mock.calls[0]![0].agentId).toBe("alpha");
   });
 
   it("refuses a body that claims to be a different agent", async () => {
     const key = await agentWithKey("alpha", [mandateA]);
-    const res = await fetch(`${base}/propose`, {
+    const res = await fetch(`${base}/clauses`, {
       method: "POST",
-      headers: { ...json, "X-Charter-Api-Key": key },
+      headers: { ...json, "X-Clausehold-Api-Key": key },
       body: bodyFor(mandateA, { agentId: "beta" }),
     });
     expect(res.status).toBe(403);
-    expect(runProposal).not.toHaveBeenCalled();
+    expect(runClause).not.toHaveBeenCalled();
   });
 
   it("refuses a mandate the agent is not bound to", async () => {
     const key = await agentWithKey("alpha", [mandateA]);
-    const res = await fetch(`${base}/propose`, { method: "POST", headers: { ...json, "X-Charter-Api-Key": key }, body: bodyFor(mandateB) });
+    const res = await fetch(`${base}/clauses`, { method: "POST", headers: { ...json, "X-Clausehold-Api-Key": key }, body: bodyFor(mandateB) });
     expect(res.status).toBe(403);
-    expect(runProposal).not.toHaveBeenCalled();
+    expect(runClause).not.toHaveBeenCalled();
   });
 
   it("rejects a revoked agent's key", async () => {
     const key = await agentWithKey("alpha", [mandateA]);
     const { revokeAgent } = await import("../src/agents/service.js");
     await revokeAgent("alpha", "alice");
-    const res = await fetch(`${base}/propose`, { method: "POST", headers: { ...json, "X-Charter-Api-Key": key }, body: bodyFor(mandateA) });
+    const res = await fetch(`${base}/clauses`, { method: "POST", headers: { ...json, "X-Clausehold-Api-Key": key }, body: bodyFor(mandateA) });
     expect(res.status).toBe(401);
   });
 
   it("once agents are registered and no shared key is set, an unauthenticated caller is refused", async () => {
     cfg.apiKey = undefined;
     await agentWithKey("alpha", [mandateA]);
-    const res = await fetch(`${base}/propose`, { method: "POST", headers: json, body: bodyFor(mandateA, { agentId: "anyone" }) });
+    const res = await fetch(`${base}/clauses`, { method: "POST", headers: json, body: bodyFor(mandateA, { agentId: "anyone" }) });
     expect(res.status).toBe(401);
   });
 
@@ -277,27 +274,27 @@ describe("per-agent keys", () => {
     const { revokeAgent } = await import("../src/agents/service.js");
     await revokeAgent("alpha", "alice");
 
-    const withRevokedKey = await fetch(`${base}/propose`, { method: "POST", headers: { ...json, "X-Charter-Api-Key": key }, body: bodyFor(mandateA, { agentId: "x" }) });
-    const withNoKey = await fetch(`${base}/propose`, { method: "POST", headers: json, body: bodyFor(mandateA, { agentId: "x" }) });
+    const withRevokedKey = await fetch(`${base}/clauses`, { method: "POST", headers: { ...json, "X-Clausehold-Api-Key": key }, body: bodyFor(mandateA, { agentId: "x" }) });
+    const withNoKey = await fetch(`${base}/clauses`, { method: "POST", headers: json, body: bodyFor(mandateA, { agentId: "x" }) });
     expect(withRevokedKey.status).toBe(401);
     expect(withNoKey.status).toBe(401);
-    expect(runProposal).not.toHaveBeenCalled();
+    expect(runClause).not.toHaveBeenCalled();
   });
 
   it("the shared key still works alongside registered agents, unless agent keys are required", async () => {
     await agentWithKey("alpha", [mandateA]);
-    vi.mocked(runProposal).mockResolvedValue(proposed("legacy"));
+    vi.mocked(runClause).mockResolvedValue(proposed("legacy"));
 
-    const ok = await fetch(`${base}/propose`, { method: "POST", headers: { ...json, ...AGENT }, body: bodyFor(mandateA, { agentId: "legacy" }) });
+    const ok = await fetch(`${base}/clauses`, { method: "POST", headers: { ...json, ...AGENT }, body: bodyFor(mandateA, { agentId: "legacy" }) });
     expect(ok.status).toBe(200);
 
     cfg.requireAgentKeys = true;
-    const refused = await fetch(`${base}/propose`, { method: "POST", headers: { ...json, ...AGENT }, body: bodyFor(mandateA, { agentId: "legacy" }) });
+    const refused = await fetch(`${base}/clauses`, { method: "POST", headers: { ...json, ...AGENT }, body: bodyFor(mandateA, { agentId: "legacy" }) });
     expect(refused.status).toBe(401);
   });
 
   it("a shared-key or open caller must still say who it is", async () => {
-    const res = await fetch(`${base}/propose`, { method: "POST", headers: { ...json, ...AGENT }, body: bodyFor(mandateA) });
+    const res = await fetch(`${base}/clauses`, { method: "POST", headers: { ...json, ...AGENT }, body: bodyFor(mandateA) });
     expect(res.status).toBe(400);
   });
 
@@ -310,7 +307,7 @@ describe("per-agent keys", () => {
       proposal: { agentId: "beta" },
     } as never);
 
-    const res = await fetch(`${base}/escalations/ap1`, { headers: { "X-Charter-Api-Key": keyA } });
+    const res = await fetch(`${base}/escalations/ap1`, { headers: { "X-Clausehold-Api-Key": keyA } });
     expect(res.status).toBe(404);
   });
 
@@ -323,93 +320,65 @@ describe("per-agent keys", () => {
       proposal: { agentId: "alpha" },
     } as never);
 
-    const res = await fetch(`${base}/escalations/ap1`, { headers: { "X-Charter-Api-Key": keyA } });
+    const res = await fetch(`${base}/escalations/ap1`, { headers: { "X-Clausehold-Api-Key": keyA } });
     expect(res.status).toBe(200);
   });
 
   it("an agent key cannot use approver routes", async () => {
     const key = await agentWithKey("alpha", [mandateA]);
-    const res = await fetch(`${base}/control/halt`, { method: "POST", headers: { ...json, "X-Charter-Api-Key": key }, body: "{}" });
+    const res = await fetch(`${base}/control/halt`, { method: "POST", headers: { ...json, "X-Clausehold-Api-Key": key }, body: "{}" });
     expect(res.status).toBe(401);
   });
 });
 
-describe("order types in requests", () => {
+describe("clause requests", () => {
   const post = (body: Record<string, unknown>) =>
-    fetch(`${base}/propose`, { method: "POST", headers: { ...json, ...AGENT }, body: JSON.stringify({ agentId: "a", mandateId: uuid, symbol: "BTCUSDT", side: "BUY", ...body }) });
+    fetch(`${base}/clauses`, { method: "POST", headers: { ...json, ...AGENT }, body: JSON.stringify({ agentId: "a", mandateId: uuid, ...clauseFields, ...body }) });
 
-  const passed = () => vi.mocked(runProposal).mockResolvedValue({ proposal: { id: "p1", agentId: "a" }, verdict: { decision: "PASS" } } as never);
+  const passed = () => vi.mocked(runClause).mockResolvedValue({ proposal: { id: "p1", agentId: "a" }, verdict: { decision: "PASS" }, cleared: true } as never);
 
-  it("accepts a LIMIT proposal sized by quantity and price and passes it through", async () => {
+  it("passes a valid clause through to the pipeline and reports it cleared", async () => {
     passed();
-    const res = await post({ type: "LIMIT", quantity: 0.001, limitPrice: 70000 });
+    const res = await post({});
     expect(res.status).toBe(200);
-    expect(vi.mocked(runProposal).mock.calls[0]![0]).toMatchObject({ type: "LIMIT", quantity: 0.001, limitPrice: 70000 });
+    expect(((await res.json()) as { cleared: boolean }).cleared).toBe(true);
+    expect(vi.mocked(runClause).mock.calls[0]![0]).toMatchObject({ agentId: "a", payee: "editor.testnet", amount: 2, deadlineMinutes: 15 });
   });
 
-  it("refuses a LIMIT proposal with no price", async () => {
-    const res = await post({ type: "LIMIT", quantity: 0.001 });
-    expect(res.status).toBe(400);
-    expect(JSON.stringify(await res.json())).toContain("limitPrice");
-    expect(runProposal).not.toHaveBeenCalled();
-  });
-
-  it("refuses a LIMIT proposal with no quantity", async () => {
-    expect((await post({ type: "LIMIT", limitPrice: 70000 })).status).toBe(400);
-  });
-
-  it("refuses a LIMIT proposal sized in USD, which would be ambiguous", async () => {
-    expect((await post({ type: "LIMIT", quantity: 1, limitPrice: 1, usd: 100 })).status).toBe(400);
-  });
-
-  it("refuses a MARKET proposal with no size", async () => {
-    expect((await post({})).status).toBe(400);
-  });
-
-  it("defaults to MARKET, sized in USD", async () => {
+  it("defaults the asset to USDC", async () => {
     passed();
-    expect((await post({ usd: 15 })).status).toBe(200);
-    expect(vi.mocked(runProposal).mock.calls[0]![0]).toMatchObject({ type: "MARKET", usd: 15 });
+    await post({ asset: undefined });
+    expect(vi.mocked(runClause).mock.calls[0]![0]).toMatchObject({ asset: "USDC" });
+  });
+
+  it("refuses a clause with no payee, no amount, a zero amount or no terms", async () => {
+    expect((await post({ payee: undefined })).status).toBe(400);
+    expect((await post({ amount: undefined })).status).toBe(400);
+    expect((await post({ amount: 0 })).status).toBe(400);
+    expect((await post({ terms: "" })).status).toBe(400);
+    expect(runClause).not.toHaveBeenCalled();
+  });
+
+  it("refuses a non-UUID mandate id", async () => {
+    expect((await post({ mandateId: "not-a-uuid" })).status).toBe(400);
   });
 
   it("turns a validation error from the pipeline into a 400, not a 500", async () => {
     const { z } = await import("zod");
-    vi.mocked(runProposal).mockRejectedValue(new z.ZodError([{ code: "custom", message: "bad", path: [] }]));
-    expect((await post({ usd: 15 })).status).toBe(400);
-  });
-});
-
-describe("resting-order controls", () => {
-  it("lists resting orders only with the approver key", async () => {
-    expect((await fetch(`${base}/control/orders`, { headers: AGENT })).status).toBe(401);
-    const ok = await fetch(`${base}/control/orders`, { headers: APPROVER });
-    expect(ok.status).toBe(200);
-    expect(((await ok.json()) as unknown[]).length).toBe(1);
+    vi.mocked(runClause).mockRejectedValue(new z.ZodError([{ code: "custom", message: "bad", path: [] }]));
+    expect((await post({})).status).toBe(400);
   });
 
-  it("halt with cancelOpen also cancels resting orders and reports how many", async () => {
-    vi.mocked(service.engageKillSwitch).mockResolvedValue({ engaged: true } as never);
-    const orders = await import("../src/execution/orders.js");
-    const res = await fetch(`${base}/control/halt`, { method: "POST", headers: { ...json, ...APPROVER }, body: JSON.stringify({ reason: "drill", cancelOpen: true }) });
-    const body = (await res.json()) as { cancelled: number };
+  it("a mandate that does not exist is a 404", async () => {
+    const { MandateNotFoundError } = await import("../src/mandate/store.js");
+    vi.mocked(runClause).mockRejectedValue(new MandateNotFoundError(uuid));
+    expect((await post({})).status).toBe(404);
+  });
+
+  it("an agent can read back its own clause by id", async () => {
+    passed();
+    await post({});
+    const res = await fetch(`${base}/clauses/p1`, { headers: AGENT });
     expect(res.status).toBe(200);
-    expect(body.cancelled).toBe(2);
-    expect(orders.cancelAllCharterOrders).toHaveBeenCalled();
-  });
-
-  it("halt without cancelOpen leaves resting orders alone", async () => {
-    vi.mocked(service.engageKillSwitch).mockResolvedValue({ engaged: true } as never);
-    const orders = await import("../src/execution/orders.js");
-    vi.mocked(orders.cancelAllCharterOrders).mockClear();
-    await fetch(`${base}/control/halt`, { method: "POST", headers: { ...json, ...APPROVER }, body: JSON.stringify({ reason: "drill" }) });
-    expect(orders.cancelAllCharterOrders).not.toHaveBeenCalled();
-  });
-
-  it("cancelling an order needs the approver key and names who did it", async () => {
-    const orders = await import("../src/execution/orders.js");
-    expect((await fetch(`${base}/control/orders/BTCUSDT/9/cancel`, { method: "POST", headers: { ...json, ...AGENT }, body: "{}" })).status).toBe(401);
-    const res = await fetch(`${base}/control/orders/BTCUSDT/9/cancel`, { method: "POST", headers: { ...json, ...APPROVER }, body: "{}" });
-    expect(res.status).toBe(200);
-    expect(orders.cancelCharterOrder).toHaveBeenCalledWith(expect.anything(), "BTCUSDT", "9", "alice");
   });
 });

@@ -2,10 +2,9 @@ import express, { type Request, type Response, type NextFunction } from "express
 import type { Server } from "node:http";
 import { z } from "zod";
 import { config } from "../config.js";
-import { runProposal } from "../policy/runProposal.js";
+import { runClause, type RunClauseResult } from "../policy/runClause.js";
 import { loadMandate, MandateNotFoundError } from "../mandate/store.js";
 import { auditLog } from "../audit/log.js";
-import type { RunProposalResult } from "../policy/runProposal.js";
 import {
   ApprovalBlockedError,
   ApprovalNotFoundError,
@@ -22,82 +21,69 @@ import {
 } from "../approval/service.js";
 import type { ApprovalStatus } from "../approval/state.js";
 import { authenticateAgent, constantTimeEquals, registryInUse } from "../agents/service.js";
-import { activeVenue } from "../venues/index.js";
-import { cancelAllCharterOrders, cancelCharterOrder, listOpenCharterOrders } from "../execution/orders.js";
 import type { AgentRecord } from "../agents/state.js";
 
-const ProposeBodySchema = z.object({
+export const DEMO_MANDATE_ID = "b2f1e9a0-1a2b-4c3d-8e4f-000000000001";
+
+const ClauseBodySchema = z.object({
   /** Required when the caller uses the shared key or no key. For a registered agent it is ignored, and must match if given. */
   agentId: z.string().min(1).optional(),
   mandateId: z.string().uuid(),
-  symbol: z.string().min(1),
-  side: z.enum(["BUY", "SELL"]),
-  type: z.enum(["MARKET", "LIMIT"]).optional().default("MARKET"),
-  /** MARKET: the amount in USD. */
-  usd: z.number().positive().optional(),
-  /** LIMIT: how much of the asset, and the price. */
-  quantity: z.number().positive().optional(),
-  limitPrice: z.number().positive().optional(),
-  reason: z.string().optional(),
-  execute: z.boolean().optional().default(false),
-}).superRefine((b, ctx) => {
-  if (b.type === "MARKET" && b.usd === undefined && b.quantity === undefined) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A MARKET proposal needs usd (or quantity)" });
-  }
-  if (b.type === "LIMIT") {
-    if (b.quantity === undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A LIMIT proposal needs quantity" });
-    if (b.limitPrice === undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A LIMIT proposal needs limitPrice" });
-    if (b.usd !== undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A LIMIT proposal is sized by quantity, not usd" });
-  }
+  buyer: z.string().min(2),
+  payee: z.string().min(2),
+  asset: z.string().min(1).default("USDC"),
+  amount: z.number().positive(),
+  terms: z.string().min(1).max(2000),
+  deadlineMinutes: z.number().positive(),
+  challengeSecs: z.number().int().min(0).optional(),
 });
 
 const DecisionBodySchema = z.object({ note: z.string().optional() });
-const HaltBodySchema = z.object({ reason: z.string().optional(), cancelOpen: z.boolean().optional().default(false) });
+const HaltBodySchema = z.object({ reason: z.string().optional() });
 
 /** Routes that decide something (approve, reject, halt, resume) rather than propose it. */
 function isApproverRoute(path: string): boolean {
   return path.startsWith("/approvals") || path.startsWith("/control");
 }
 
+function view(result: RunClauseResult) {
+  return {
+    proposalId: result.proposal.id,
+    proposal: result.proposal,
+    verdict: result.verdict,
+    cleared: result.cleared,
+    approval: result.approval ?? null,
+  };
+}
+
 /**
- * The surface other agents (and the rogue-agent demo process) call.
+ * The surface agents (and the studio-agent demo process) call.
  *
  * Two separate credentials, on purpose:
- *   - CHARTER_API_KEY (X-Charter-Api-Key) lets a caller propose and read
- *     the outcome of its own proposals.
- *   - CHARTER_APPROVER_KEY (X-Charter-Approver-Key, plus X-Charter-Approver
- *     naming who is deciding) is required to approve, reject, halt, or
- *     resume. An agent holding only the first key can never approve its
- *     own escalation.
+ *   - CLAUSEHOLD_API_KEY (X-Clausehold-Api-Key) lets a caller propose
+ *     clauses and read the outcome of its own.
+ *   - CLAUSEHOLD_APPROVER_KEY (X-Clausehold-Approver-Key, plus
+ *     X-Clausehold-Approver naming who is deciding) is required to approve,
+ *     reject, halt, or resume. An agent holding only the first key can never
+ *     approve its own escalation.
  */
-export function startApiServer(): Server {
+export function createApp(): express.Express {
   const app = express();
   app.use(express.json());
-
-  void registryInUse().then((any) => {
-    if (config.requireAgentKeys && !any) {
-      console.log("Note: CHARTER_REQUIRE_AGENT_KEYS is set but no agents have been registered, so every proposal is refused until one is (charter agent add).");
-    } else if (!config.requireAgentKeys && !config.apiKey && !any) {
-      console.log("Warning: no CHARTER_API_KEY is set and no agents have been registered. Anyone who can reach this API can submit proposals.");
-    }
-  });
-  if (!config.approverKey) {
-    console.log("Note: CHARTER_APPROVER_KEY is not set, so the approve/reject/halt/resume endpoints are disabled. Use the CLI to decide.");
-  }
 
   app.use(async (req: Request, res: Response, next: NextFunction) => {
     if (isApproverRoute(req.path)) {
       if (!config.approverKey) {
-        res.status(403).json({ error: "Approver endpoints are disabled: CHARTER_APPROVER_KEY is not set on this server" });
+        res.status(403).json({ error: "Approver endpoints are disabled: CLAUSEHOLD_APPROVER_KEY is not set on this server" });
         return;
       }
-      const presentedApprover = req.get("X-Charter-Approver-Key");
+      const presentedApprover = req.get("X-Clausehold-Approver-Key");
       if (!presentedApprover || !constantTimeEquals(presentedApprover, config.approverKey)) {
-        res.status(401).json({ error: "Missing or invalid X-Charter-Approver-Key header" });
+        res.status(401).json({ error: "Missing or invalid X-Clausehold-Approver-Key header" });
         return;
       }
-      if (!req.get("X-Charter-Approver")) {
-        res.status(400).json({ error: "X-Charter-Approver header is required and must name who is deciding" });
+      if (!req.get("X-Clausehold-Approver")) {
+        res.status(400).json({ error: "X-Clausehold-Approver header is required and must name who is deciding" });
         return;
       }
       next();
@@ -105,7 +91,7 @@ export function startApiServer(): Server {
     }
 
     try {
-      const presented = req.get("X-Charter-Api-Key");
+      const presented = req.get("X-Clausehold-Api-Key");
 
       // A registered agent's own key identifies it. From here on its identity
       // comes from the key, never from anything the request body claims.
@@ -116,8 +102,7 @@ export function startApiServer(): Server {
         return;
       }
 
-      // The single shared key from before per-agent keys existed. Refused
-      // outright when CHARTER_REQUIRE_AGENT_KEYS=true.
+      // The single shared key. Refused outright when CLAUSEHOLD_REQUIRE_AGENT_KEYS=true.
       if (!config.requireAgentKeys && config.apiKey && presented && constantTimeEquals(presented, config.apiKey)) {
         next();
         return;
@@ -129,22 +114,22 @@ export function startApiServer(): Server {
         return;
       }
 
-      res.status(401).json({ error: "Missing or invalid X-Charter-Api-Key header" });
+      res.status(401).json({ error: "Missing or invalid X-Clausehold-Api-Key header" });
     } catch (err) {
       next(err);
     }
   });
 
-  // In-memory index of recent results for GET /status/:id. The audit log
+  // In-memory index of recent results for GET /clauses/:id. The audit log
   // remains the durable source of truth; this is just a fast lookup cache.
-  const recent = new Map<string, RunProposalResult>();
+  const recent = new Map<string, RunClauseResult>();
 
-  const approver = (req: Request): string => req.get("X-Charter-Approver") as string;
+  const approver = (req: Request): string => req.get("X-Clausehold-Approver") as string;
 
-  app.post("/propose", async (req: Request, res: Response) => {
-    const parsed = ProposeBodySchema.safeParse(req.body);
+  app.post("/clauses", async (req: Request, res: Response) => {
+    const parsed = ClauseBodySchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid proposal", issues: parsed.error.issues });
+      res.status(400).json({ error: "Invalid clause", issues: parsed.error.issues });
       return;
     }
     const agent = res.locals.agent as AgentRecord | undefined;
@@ -166,45 +151,35 @@ export function startApiServer(): Server {
     }
 
     try {
-      const result = await runProposal({ ...parsed.data, agentId });
+      const result = await runClause({ ...parsed.data, agentId });
       recent.set(result.proposal.id, result);
-      res.status(200).json({
-        proposalId: result.proposal.id,
-        verdict: result.verdict,
-        execution: result.execution ?? null,
-        approval: result.approval ?? null,
-      });
+      res.status(200).json(view(result));
     } catch (err) {
       if (err instanceof MandateNotFoundError) {
         res.status(404).json({ error: err.message });
         return;
       }
       if (err instanceof z.ZodError) {
-        res.status(400).json({ error: "Invalid proposal", issues: err.issues });
+        res.status(400).json({ error: "Invalid clause", issues: err.issues });
         return;
       }
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 
-  app.get("/status/:id", (req: Request, res: Response) => {
+  app.get("/clauses/:id", (req: Request, res: Response) => {
     const result = recent.get(req.params.id as string);
     const agent = res.locals.agent as AgentRecord | undefined;
-    // A registered agent only ever sees its own proposals. Someone else's is
+    // A registered agent only ever sees its own clauses. Someone else's is
     // reported as unknown, so its existence is not revealed either.
     if (!result || (agent && result.proposal.agentId !== agent.agentId)) {
-      res.status(404).json({ error: "Unknown proposal id (not seen since this server started)" });
+      res.status(404).json({ error: "Unknown clause id (not seen since this server started)" });
       return;
     }
-    res.json({
-      proposalId: result.proposal.id,
-      verdict: result.verdict,
-      execution: result.execution ?? null,
-      approval: result.approval ?? null,
-    });
+    res.json(view(result));
   });
 
-  // What an agent polls after an ESCALATE: only the outcome, never the proposal detail.
+  // What an agent polls after an ESCALATE: only the outcome, never the clause detail.
   app.get("/escalations/:approvalId", async (req: Request, res: Response) => {
     try {
       const record = await getApproval(req.params.approvalId as string);
@@ -244,7 +219,7 @@ export function startApiServer(): Server {
       try {
         if (action === "approve") {
           const outcome = await approve(id, approver(req), body.data.note);
-          res.json({ approval: outcome.record, verdict: outcome.verdict, execution: outcome.execution });
+          res.json({ approval: outcome.record, verdict: outcome.verdict, cleared: true });
         } else {
           res.json({ approval: await reject(id, approver(req), body.data.note) });
         }
@@ -278,24 +253,7 @@ export function startApiServer(): Server {
       res.status(400).json({ error: "Invalid body", issues: body.error.issues });
       return;
     }
-    const killSwitch = await engageKillSwitch(approver(req), body.data.reason);
-    // Optionally pull every resting CHARTER order off the book as well, since a
-    // halt stops new proposals but does not by itself stop an order already resting.
-    const cancelled = body.data.cancelOpen ? await cancelAllCharterOrders(activeVenue, approver(req), body.data.reason ?? "kill switch") : undefined;
-    res.json({ killSwitch, ...(cancelled ? { cancelled: cancelled.cancelled.length, failed: cancelled.failed } : {}) });
-  });
-
-  app.get("/control/orders", async (_req: Request, res: Response) => {
-    res.json(await listOpenCharterOrders(activeVenue));
-  });
-
-  app.post("/control/orders/:symbol/:orderId/cancel", async (req: Request, res: Response) => {
-    try {
-      await cancelCharterOrder(activeVenue, req.params.symbol as string, req.params.orderId as string, approver(req));
-      res.json({ cancelled: req.params.orderId });
-    } catch (err) {
-      res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
-    }
+    res.json({ killSwitch: await engageKillSwitch(approver(req), body.data.reason) });
   });
 
   app.post("/control/resume", async (req: Request, res: Response) => {
@@ -303,10 +261,9 @@ export function startApiServer(): Server {
   });
 
   app.get("/mandate", async (req: Request, res: Response) => {
-    const id = (req.query.id as string) ?? "b2f1e9a0-1a2b-4c3d-8e4f-000000000001";
+    const id = (req.query.id as string) ?? DEMO_MANDATE_ID;
     try {
-      const mandate = await loadMandate(id);
-      res.json(mandate);
+      res.json(await loadMandate(id));
     } catch {
       res.status(404).json({ error: `No mandate found with id ${id}` });
     }
@@ -330,10 +287,25 @@ export function startApiServer(): Server {
     res.status(500).json({ error: "Internal server error" });
   });
 
-  const server = app.listen(config.apiPort, () => {
-    console.log(`CHARTER API listening on http://localhost:${config.apiPort}`);
-    console.log(`  POST   /propose                    (agent key)`);
-    console.log(`  GET    /status/:id                 (agent key)`);
+  return app;
+}
+
+export function startApiServer(): Server {
+  void registryInUse().then((any) => {
+    if (config.requireAgentKeys && !any) {
+      console.log("Note: CLAUSEHOLD_REQUIRE_AGENT_KEYS is set but no agents have been registered, so every clause is refused until one is (clausehold agent add).");
+    } else if (!config.requireAgentKeys && !config.apiKey && !any) {
+      console.log("Warning: no CLAUSEHOLD_API_KEY is set and no agents have been registered. Anyone who can reach this API can propose clauses.");
+    }
+  });
+  if (!config.approverKey) {
+    console.log("Note: CLAUSEHOLD_APPROVER_KEY is not set, so the approve/reject/halt/resume endpoints are disabled. Use the CLI to decide.");
+  }
+
+  return createApp().listen(config.apiPort, () => {
+    console.log(`Clausehold API listening on http://localhost:${config.apiPort} (${config.network}, factory ${config.factoryAccountId})`);
+    console.log(`  POST   /clauses                    (agent key)`);
+    console.log(`  GET    /clauses/:id                (agent key)`);
     console.log(`  GET    /escalations/:approvalId    (agent key)`);
     console.log(`  GET    /approvals                  (approver key)`);
     console.log(`  POST   /approvals/:id/approve      (approver key)`);
@@ -343,6 +315,4 @@ export function startApiServer(): Server {
     console.log(`  GET    /mandate?id=<mandateId>`);
     console.log(`  GET    /audit/tail?n=20`);
   });
-
-  return server;
 }

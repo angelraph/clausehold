@@ -1,18 +1,15 @@
 import type { Mandate } from "../../mandate/schema.js";
-import type { RuleResult, SimulationResult } from "../types.js";
+import type { ClauseProposal, RuleResult } from "../types.js";
 
-/** Not a VETO by itself. Crossing this threshold escalates to a human, it doesn't block. */
-export function checkConfirmAbove(simulation: SimulationResult, mandate: Mandate): RuleResult {
-  if (simulation.notionalUsd > mandate.limits.confirmAboveUsd) {
+/** Not a VETO by itself. Crossing this threshold escalates to a second person, it doesn't block. */
+export function checkConfirmAbove(proposal: ClauseProposal, mandate: Mandate): RuleResult {
+  const limit = mandate.limits.confirmAbove;
+  if (proposal.amount > limit) {
     return {
-      rule: "confirmAboveUsd",
+      rule: "confirmAbove",
       outcome: "warning",
-      detail: `Notional $${simulation.notionalUsd.toFixed(2)} exceeds confirmAboveUsd $${mandate.limits.confirmAboveUsd}, requires explicit human confirmation`,
+      detail: `${proposal.amount} ${proposal.asset} is above the ${limit} auto-confirm threshold and needs a second person`,
     };
   }
-  return {
-    rule: "confirmAboveUsd",
-    outcome: "ok",
-    detail: `Notional $${simulation.notionalUsd.toFixed(2)} is within the auto-confirm threshold of $${mandate.limits.confirmAboveUsd}`,
-  };
+  return { rule: "confirmAbove", outcome: "ok", detail: `${proposal.amount} ${proposal.asset} is within the ${limit} auto-confirm threshold` };
 }

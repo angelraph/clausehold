@@ -2,21 +2,18 @@ import "dotenv/config";
 import { z } from "zod";
 
 const ConfigSchema = z.object({
-  executionVenue: z.enum(["testnet", "mainnet-mcp"]),
-  testnet: z.object({
-    apiKey: z.string(),
-    apiSecret: z.string(),
+  /** Which NEAR network clauses are written to. Intents funding exists on mainnet only. */
+  network: z.enum(["testnet", "mainnet"]),
+  /** The factory contract that creates one sub-account per clause, e.g. clausehold.testnet. */
+  factoryAccountId: z.string().min(2),
+  /** Optional RPC override. Defaults per network live in src/near/network.ts. */
+  nearRpcUrl: z.string().url().optional(),
+  /** NEAR AI Cloud (OpenAI-compatible). Used for the mandate compiler and delivery notes, never to authorize money. */
+  nearAi: z.object({
+    apiKey: z.string().optional(),
     baseUrl: z.string().url(),
+    model: z.string().optional(),
   }),
-  mcp: z.object({
-    url: z.string().url(),
-    /** HTTPS URL of the client metadata document that identifies CHARTER to the MCP server's authorization server. */
-    clientMetadataUrl: z.string().url(),
-    /** Local port the OAuth redirect comes back to. Must match a redirect URI in the client metadata document. */
-    callbackPort: z.coerce.number().int().min(1024).max(65535),
-  }),
-  openaiApiKey: z.string().optional(),
-  openaiModel: z.string(),
   apiPort: z.coerce.number().int().positive(),
   apiKey: z.string().optional(),
   approverKey: z.string().optional(),
@@ -29,27 +26,23 @@ const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 function loadConfig(): Config {
+  const network = process.env.CLAUSEHOLD_NETWORK ?? "testnet";
   const raw = {
-    executionVenue: process.env.EXECUTION_VENUE ?? "testnet",
-    testnet: {
-      apiKey: process.env.BINANCE_TESTNET_API_KEY ?? "",
-      apiSecret: process.env.BINANCE_TESTNET_API_SECRET ?? "",
-      baseUrl: process.env.BINANCE_TESTNET_BASE_URL ?? "https://testnet.binance.vision",
+    network,
+    factoryAccountId: process.env.CLAUSEHOLD_FACTORY_ACCOUNT ?? (network === "mainnet" ? "clausehold.near" : "clausehold.testnet"),
+    nearRpcUrl: process.env.CLAUSEHOLD_NEAR_RPC_URL || undefined,
+    nearAi: {
+      apiKey: process.env.NEARAI_API_KEY || undefined,
+      baseUrl: process.env.NEARAI_BASE_URL ?? "https://cloud-api.near.ai/v1",
+      model: process.env.NEARAI_MODEL || undefined,
     },
-    mcp: {
-      url: process.env.BINANCE_MCP_URL ?? "https://agent.binance.com/mcp/agentic",
-      clientMetadataUrl: process.env.CHARTER_MCP_CLIENT_METADATA_URL ?? "https://angelraph.github.io/charter/mcp-client.json",
-      callbackPort: process.env.CHARTER_MCP_CALLBACK_PORT ?? 8976,
-    },
-    openaiApiKey: process.env.OPENAI_API_KEY || undefined,
-    openaiModel: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-    apiPort: process.env.CHARTER_API_PORT ?? 4477,
-    apiKey: process.env.CHARTER_API_KEY || undefined,
-    approverKey: process.env.CHARTER_APPROVER_KEY || undefined,
-    requireAgentKeys: process.env.CHARTER_REQUIRE_AGENT_KEYS === "true",
-    approvalTtlMinutes: process.env.CHARTER_APPROVAL_TTL_MINUTES ?? 10,
-    auditLogPath: process.env.CHARTER_AUDIT_LOG_PATH ?? "./data/audit.log.jsonl",
-    mandatesDir: process.env.CHARTER_MANDATES_DIR ?? "./data/mandates",
+    apiPort: process.env.CLAUSEHOLD_API_PORT ?? 4477,
+    apiKey: process.env.CLAUSEHOLD_API_KEY || undefined,
+    approverKey: process.env.CLAUSEHOLD_APPROVER_KEY || undefined,
+    requireAgentKeys: process.env.CLAUSEHOLD_REQUIRE_AGENT_KEYS === "true",
+    approvalTtlMinutes: process.env.CLAUSEHOLD_APPROVAL_TTL_MINUTES ?? 10,
+    auditLogPath: process.env.CLAUSEHOLD_AUDIT_LOG_PATH ?? "./data/audit.log.jsonl",
+    mandatesDir: process.env.CLAUSEHOLD_MANDATES_DIR ?? "./data/mandates",
   };
 
   const parsed = ConfigSchema.safeParse(raw);
@@ -58,12 +51,9 @@ function loadConfig(): Config {
     process.exit(1);
   }
 
-  // Deliberately no venue-specific validation here (e.g. "testnet needs API keys").
-  // config.ts is imported by modules with nothing to do with any venue, such as
-  // the audit log and the mandate store, and by the unit tests. A missing
-  // credential should fail loudly the moment something actually tries to use
-  // that venue, not the moment any file merely imports config. See
-  // venues/index.ts for that check.
+  // No credential checks here on purpose. config.ts is imported by the audit
+  // log, the mandate store and the unit tests. A missing key fails loudly when
+  // something actually uses it, not when a file merely imports config.
   return parsed.data;
 }
 

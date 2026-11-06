@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { deriveApprovals, deriveKillSwitch } from "../src/approval/state.js";
 import type { AuditEntry, AuditEventType } from "../src/audit/log.js";
-import type { Proposal, Verdict } from "../src/policy/types.js";
+import type { ClauseProposal, Verdict } from "../src/policy/types.js";
 
 let seq = 0;
 function entry(type: AuditEventType, payload: unknown, timestamp = new Date().toISOString()): AuditEntry {
-  return { seq: seq++, timestamp, type, venue: "n/a", payload, prevHash: "x", hash: "y" };
+  return { seq: seq++, timestamp, type, network: "n/a", payload, prevHash: "x", hash: "y" };
 }
 
-const proposal = { id: "p1", agentId: "agent-a", symbol: "BTCUSDT" } as unknown as Proposal;
+const proposal = { id: "p1", agentId: "agent-a", payee: "editor.testnet" } as unknown as ClauseProposal;
 const verdict = { id: "v1", decision: "ESCALATE" } as unknown as Verdict;
 
 function requested(approvalId: string, expiresAt: string): AuditEntry {

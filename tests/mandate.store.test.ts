@@ -15,21 +15,22 @@ function makeMandate(): Mandate {
     version: 1,
     owner: "test",
     createdAt: new Date().toISOString(),
-    subAccountId: "test-account",
+    factoryAccountId: "clausehold.testnet",
     naturalLanguageSource: "test mandate",
     status: "active",
     limits: {
-      perTradeMaxUsd: 50,
-      dailySpendCapUsd: 500,
-      maxLeverage: 1,
-      dailyDrawdownHaltPct: 5,
-      confirmAboveUsd: 20,
+      maxPerClause: 50,
+      dailySpendCap: 500,
+      perPayeeDailyCap: 100,
+      newPayeeCeiling: 20,
+      confirmAbove: 20,
+      allowedAssets: ["USDC"],
     },
   };
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(path.join(tmpdir(), "charter-mandate-store-test-"));
+  dir = mkdtempSync(path.join(tmpdir(), "clausehold-mandate-store-test-"));
   originalMandatesDir = config.mandatesDir;
   config.mandatesDir = dir;
 });

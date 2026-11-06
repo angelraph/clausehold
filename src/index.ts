@@ -1,117 +1,93 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { initCommand } from "./cli/commands/init.js";
-import { proposeCommand } from "./cli/commands/propose.js";
+import { clauseProposeCommand } from "./cli/commands/clause.js";
 import { auditTailCommand, auditVerifyCommand } from "./cli/commands/audit.js";
 import { mandateCompileCommand } from "./cli/commands/mandate.js";
-import { startApiServer } from "./api/server.js";
+import { startApiServer, DEMO_MANDATE_ID } from "./api/server.js";
 import { startDashboard } from "./cli/ui.js";
-import { mcpLoginCommand, mcpProbeCommand, mcpStatusCommand, mcpToolsCommand } from "./cli/commands/mcp.js";
 import { agentAddCommand, agentListCommand, agentRevokeCommand, agentRotateCommand } from "./cli/commands/agents.js";
-import {
-  approvalsListCommand,
-  approveCommand,
-  cancelCommand,
-  controlStatusCommand,
-  haltCommand,
-  ordersCommand,
-  rejectCommand,
-  resumeCommand,
-} from "./cli/commands/control.js";
+import { approvalsListCommand, approveCommand, controlStatusCommand, haltCommand, rejectCommand, resumeCommand } from "./cli/commands/control.js";
 
 const program = new Command();
 
-program.name("charter").description("CHARTER: a mandate/policy layer that vets AI agent trade proposals before execution.").version("0.1.0");
+program
+  .name("clausehold")
+  .description("Clausehold: pay a person or an agent for a finished job. The money is held under a clause, and the clause is the only key that moves it.")
+  .version("0.2.0");
 
 program
   .command("init")
-  .description("Activate the demo mandate (covenant -> live policy)")
+  .description("Activate the demo mandate")
   .action(async () => {
     await initCommand();
   });
 
-interface ProposeCliOptions {
-  usd?: number;
-  type: string;
-  qty?: number;
-  limitPrice?: number;
+interface ClauseCliOptions {
+  buyer: string;
+  asset: string;
+  terms: string;
+  minutes: number;
+  challenge: number;
   mandate: string;
   agent: string;
-  execute: boolean;
 }
 
 program
-  .command("propose")
-  .description("Submit a trade proposal for a PASS/VETO/ESCALATE verdict, optionally executing it")
-  .argument("<symbol>", "e.g. BTCUSDT")
-  .argument("<side>", "BUY or SELL")
-  .option("--usd <amount>", "MARKET: how much to trade, in USD", parseFloat)
-  .option("--type <type>", "MARKET or LIMIT", "MARKET")
-  .option("--qty <amount>", "LIMIT: how much of the asset", parseFloat)
-  .option("--limit-price <price>", "LIMIT: the price", parseFloat)
-  .option("--mandate <id>", "mandate id", "b2f1e9a0-1a2b-4c3d-8e4f-000000000001")
-  .option("--agent <id>", "identifier of the agent making the proposal", "cli-operator")
-  .option("--execute", "place the real order if the verdict is PASS (an ESCALATE always waits for a separate approval)", false)
-  .action(async (symbol: string, side: string, opts: ProposeCliOptions) => {
-    if (side !== "BUY" && side !== "SELL") {
-      console.error("side must be BUY or SELL");
-      process.exit(1);
-    }
-    const type = opts.type.toUpperCase();
-    if (type !== "MARKET" && type !== "LIMIT") {
-      console.error("--type must be MARKET or LIMIT");
-      process.exit(1);
-    }
-    if (type === "MARKET" && opts.usd === undefined) {
-      console.error("A MARKET proposal needs --usd");
-      process.exit(1);
-    }
-    if (type === "LIMIT" && (opts.qty === undefined || opts.limitPrice === undefined)) {
-      console.error("A LIMIT proposal needs --qty and --limit-price");
-      process.exit(1);
-    }
-    await proposeCommand({
-      symbol: symbol.toUpperCase(),
-      side,
-      type,
-      usd: opts.usd,
-      quantity: opts.qty,
-      limitPrice: opts.limitPrice,
-      mandateId: opts.mandate,
+  .command("clause")
+  .description("Propose a clause: check it against the mandate for a PASS / VETO / ESCALATE verdict before anyone signs")
+  .argument("<payee>", "NEAR account to be paid on release")
+  .argument("<amount>", "amount in stablecoin units", parseFloat)
+  .requiredOption("--buyer <account>", "NEAR account that funds the clause and receives the return on expiry")
+  .requiredOption("--terms <text>", "what must be delivered")
+  .option("--asset <symbol>", "asset to pay in", "USDC")
+  .option("--minutes <n>", "minutes until the clause expires and returns", parseFloat, 15)
+  .option("--challenge <secs>", "seconds after delivery during which the buyer may freeze", (v) => parseInt(v, 10), 0)
+  .option("--mandate <id>", "mandate id", DEMO_MANDATE_ID)
+  .option("--agent <id>", "identifier of the agent proposing", "cli-operator")
+  .action(async (payee: string, amount: number, opts: ClauseCliOptions) => {
+    await clauseProposeCommand({
       agentId: opts.agent,
-      execute: opts.execute,
+      mandateId: opts.mandate,
+      buyer: opts.buyer,
+      payee,
+      asset: opts.asset,
+      amount,
+      terms: opts.terms,
+      deadlineMinutes: opts.minutes,
+      challengeSecs: opts.challenge,
     });
   });
 
 program
   .command("dashboard")
-  .description("Live terminal ops console: mandate, verdict feed, real fills. Polls the real audit log.")
+  .description("Live terminal desk: mandate, verdicts, clause lifecycle. Polls the audit log.")
   .action(() => {
     startDashboard();
   });
 
 program
   .command("serve")
-  .description("Start the local HTTP API other agents propose against (POST /propose)")
+  .description("Start the local HTTP API agents propose clauses against (POST /clauses)")
   .action(() => {
     startApiServer();
   });
 
-const mandate = program.command("mandate").description("Manage mandates (covenants compiled into live policy)");
+const mandate = program.command("mandate").description("Manage mandates (a treasury's rule, compiled into live policy)");
 
 mandate
   .command("compile")
-  .description("Compile a plain-English covenant into a draft mandate, then activate it on confirmation")
-  .argument("<text>", "the covenant, in plain English")
-  .option("--owner <email>", "mandate owner", "uzoechiraphael1@gmail.com")
-  .option("--sub-account <id>", "sub-account identifier", "testnet-demo")
-  .action(async (text: string, opts: { owner: string; subAccount: string }) => {
-    await mandateCompileCommand(text, opts.owner, opts.subAccount);
+  .description("Compile a plain-English rule into a draft mandate with NEAR AI Cloud, then activate it on confirmation")
+  .argument("<text>", "the rule, in plain English")
+  .requiredOption("--owner <account>", "who sets the mandate, e.g. the DAO account")
+  .option("--factory <account>", "factory contract the mandate governs")
+  .action(async (text: string, opts: { owner: string; factory?: string }) => {
+    await mandateCompileCommand(text, opts.owner, opts.factory);
   });
 
 program
   .command("approvals")
-  .description("List escalated proposals waiting on, or already given, a human decision")
+  .description("List escalated clauses waiting on, or already given, a second person's decision")
   .option("--status <status>", "pending, granted, rejected, or expired")
   .action(async (opts: { status?: string }) => {
     await approvalsListCommand(opts.status);
@@ -119,7 +95,7 @@ program
 
 program
   .command("approve")
-  .description("Approve an escalated proposal. It is re-checked against current conditions, then executed.")
+  .description("Approve an escalated clause. It is re-checked against current conditions, then cleared.")
   .argument("<approvalId>")
   .option("--approver <name>", "who is approving (defaults to your OS username)")
   .option("--note <text>", "reason recorded in the audit log")
@@ -129,7 +105,7 @@ program
 
 program
   .command("reject")
-  .description("Reject an escalated proposal. Nothing is placed.")
+  .description("Reject an escalated clause. Nothing is written.")
   .argument("<approvalId>")
   .option("--approver <name>", "who is rejecting (defaults to your OS username)")
   .option("--note <text>", "reason recorded in the audit log")
@@ -139,30 +115,11 @@ program
 
 program
   .command("halt")
-  .description("Engage the kill switch: every proposal is vetoed until it is released")
+  .description("Engage the kill switch: no new clause is written until it is released")
   .option("--by <name>", "who is halting (defaults to your OS username)")
   .option("--reason <text>", "why, recorded in the audit log")
-  .option("--cancel-open", "also cancel every CHARTER order resting on the book", false)
-  .action(async (opts: { by?: string; reason?: string; cancelOpen: boolean }) => {
-    await haltCommand(opts.by, opts.reason, opts.cancelOpen);
-  });
-
-program
-  .command("orders")
-  .description("List CHARTER orders resting on the book")
-  .action(async () => {
-    await ordersCommand();
-  });
-
-program
-  .command("cancel")
-  .description("Cancel a resting CHARTER order")
-  .argument("<symbol>")
-  .argument("<orderId>")
-  .option("--by <name>", "who is cancelling (defaults to your OS username)")
-  .option("--reason <text>")
-  .action(async (symbol: string, orderId: string, opts: { by?: string; reason?: string }) => {
-    await cancelCommand(symbol, orderId, opts.by, opts.reason);
+  .action(async (opts: { by?: string; reason?: string }) => {
+    await haltCommand(opts.by, opts.reason);
   });
 
 program
@@ -180,7 +137,7 @@ program
     await controlStatusCommand();
   });
 
-const agent = program.command("agent").description("Register the agents allowed to propose, each with its own key bound to specific mandates");
+const agent = program.command("agent").description("Register the agents allowed to propose clauses, each with its own key bound to specific mandates");
 
 agent
   .command("add")
@@ -215,36 +172,6 @@ agent
   .description("List registered agents")
   .action(async () => {
     await agentListCommand();
-  });
-
-const mcp = program.command("mcp").description("Connect to the Binance Agent OS MCP server (experimental)");
-
-mcp
-  .command("probe")
-  .description("Show how the server says to authenticate. Public information, no login needed.")
-  .action(async () => {
-    await mcpProbeCommand();
-  });
-
-mcp
-  .command("login")
-  .description("Approve CHARTER in your browser. Needs a real Binance login.")
-  .action(async () => {
-    await mcpLoginCommand();
-  });
-
-mcp
-  .command("tools")
-  .description("List the tools the server offers and save their schemas")
-  .action(async () => {
-    await mcpToolsCommand();
-  });
-
-mcp
-  .command("status")
-  .description("Show whether a login is stored")
-  .action(async () => {
-    await mcpStatusCommand();
   });
 
 const audit = program.command("audit").description("Inspect the hash-chained audit log");
