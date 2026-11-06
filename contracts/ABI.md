@@ -117,7 +117,7 @@ A NEP-141 + NEP-145 token, symbol `mUSD`, **6 decimals**. Deployed by `./deploy.
 | `storage_deposit` | NEP-145 | 0.00125 NEAR | 30 Tgas | anyone | `{total, available}` |
 | views | `ft_balance_of {account_id}`, `ft_metadata`, `ft_total_supply`, `storage_balance_of {account_id}`, `storage_balance_bounds` | | | | |
 
-`faucet()` registers the caller if needed (the token pays the storage) and tops the caller's balance up to **20 mUSD (`"20000000"`)**. It returns how much it minted, which is `"0"` if the caller is already at the cap. The caller needs a NEAR account with a little NEAR for gas. Judges can create one with the testnet faucet and wallet.
+`faucet()` registers the caller if needed (the token pays the storage) and tops the caller's balance up to **100 mUSD (`"100000000"`)**. It returns how much it minted, which is `"0"` if the caller is already at the cap. The caller needs a NEAR account with a little NEAR for gas. Judges can create one with the testnet faucet and wallet.
 
 ## NEP-297 events
 

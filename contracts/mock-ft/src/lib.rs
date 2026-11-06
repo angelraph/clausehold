@@ -1,5 +1,5 @@
 //! Test-only NEP-141 token with NEP-145 registration.
-//! `faucet` gives any caller up to 20 mUSD (registration included); this is
+//! `faucet` gives any caller up to 100 mUSD (registration included); this is
 //! the method the web desk points judges at. `mint` is open to anyone. `set_fail_transfers(true)` makes `ft_transfer`
 //! panic, to prove a failed payout leaves a clause retryable. Do not deploy
 //! anywhere that matters.
@@ -12,8 +12,8 @@ use near_sdk::{
 };
 
 const STORAGE_MIN: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
-/// The faucet tops a caller up to this balance (20 mUSD, 6 decimals).
-pub const FAUCET_CAP: u128 = 20_000_000;
+/// The faucet tops a caller up to this balance (100 mUSD, 6 decimals).
+pub const FAUCET_CAP: u128 = 100_000_000;
 const GAS_ON_TRANSFER: Gas = Gas::from_tgas(60);
 const GAS_RESOLVE: Gas = Gas::from_tgas(10);
 
@@ -64,7 +64,7 @@ impl MockFt {
 
     /// Public testnet faucet: no args, no deposit. Registers the caller (the
     /// token pays the ~100 bytes of storage) and tops their balance up to
-    /// `FAUCET_CAP` (20 mUSD). Returns the amount minted.
+    /// `FAUCET_CAP` (100 mUSD). Returns the amount minted.
     pub fn faucet(&mut self) -> U128 {
         let who = env::predecessor_account_id();
         let have = self.balances.get(&who).copied().unwrap_or(0);

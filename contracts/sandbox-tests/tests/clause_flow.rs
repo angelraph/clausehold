@@ -375,8 +375,8 @@ async fn test_token_faucet_registers_and_caps() -> Result<()> {
     // A fresh account that was never registered on the FT.
     let r = ok(call0(&env.stranger, env.ft.id(), "faucet").await?)?;
     let minted: String = r.json()?;
-    assert_eq!(minted, "20000000");
-    assert_eq!(balance(&env, env.stranger.id()).await?, 20 * USDC);
+    assert_eq!(minted, "100000000");
+    assert_eq!(balance(&env, env.stranger.id()).await?, 100 * USDC);
     // Calling again tops up to the cap only.
     let r = ok(call0(&env.stranger, env.ft.id(), "faucet").await?)?;
     let minted: String = r.json()?;

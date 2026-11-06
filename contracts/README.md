@@ -6,7 +6,7 @@ Rust, near-sdk 5.30. One cargo workspace:
 |---|---|
 | `factory` | `clausehold.near` / `clausehold.testnet`. Holds the mandate, creates clauses, keeps receipts and standing. |
 | `clause` | One escrow per job at `r-<n>.<factory>`. Deployed by the factory, never by hand. |
-| `mock-ft` | Test-only NEP-141 (`mUSD`, 6 decimals) with a public `faucet()` (20 mUSD per account), open `mint` and failure switches. Testnet demo token. Never on mainnet. |
+| `mock-ft` | Test-only NEP-141 (`mUSD`, 6 decimals) with a public `faucet()` (100 mUSD per account), open `mint` and failure switches. Testnet demo token. Never on mainnet. |
 | `sandbox-tests` | near-workspaces tests that run all three in a local sandbox. |
 
 ## How the money moves

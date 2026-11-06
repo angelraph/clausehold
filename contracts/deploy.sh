@@ -40,7 +40,8 @@ if [ "$NET" = mainnet ]; then
   MAX=5000000 PAYEE_DAY=10000000 DAY=20000000 NEW_PAYEE=3000000
 else
   ASSET="${ASSET:-musd.$FACTORY}"
-  MAX=5000000 PAYEE_DAY=10000000 DAY=50000000 NEW_PAYEE=3000000
+  # Matches the hosted desk demo: 25 per clause, 50 per payee a day, 200 a day, 10 for a new payee.
+  MAX=25000000 PAYEE_DAY=50000000 DAY=200000000 NEW_PAYEE=10000000
 fi
 
 echo "== deploy factory to $FACTORY ($NET)"
@@ -55,7 +56,7 @@ near contract call-function as-transaction "$FACTORY" set_clause_code \
 
 if [ "$NET" = testnet ] && [ "$ASSET" = "musd.$FACTORY" ]; then
   [ -f "$OUT/mock-ft/mock_ft.wasm" ] || { echo "missing mock_ft.wasm; run ./build.sh" >&2; exit 1; }
-  echo "== test FT at $ASSET (public faucet(): 20 mUSD per account; testnet only)"
+  echo "== test FT at $ASSET (public faucet(): 100 mUSD per account; testnet only)"
   near account create-account fund-myself "$ASSET" '5 NEAR' autogenerate-new-keypair \
     save-to-keychain sign-as "$FACTORY" "${SIGN[@]}"
   near contract deploy "$ASSET" use-file "$OUT/mock-ft/mock_ft.wasm" \
