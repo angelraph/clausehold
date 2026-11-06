@@ -111,7 +111,7 @@ async fn worker_key_can_only_call_submit_delivery() -> Result<()> {
 
     // Direct transactions signed by the worker key.
     for method in ["release", "expire", "sync_funding", "freeze", "report_outcome", "ensure_registered"] {
-        let r = w.call(&c.account, method).args_json(json!({})).max_gas().transact().await;
+        let r = w.call(&c.account, method).args_json(json!({})).gas(near_workspaces::types::Gas::from_tgas(10)).transact().await;
         let failed = match r {
             Err(_) => true, // rejected as an invalid transaction
             Ok(r) => r.is_failure(),
@@ -150,10 +150,12 @@ async fn worker_key_can_only_call_submit_delivery() -> Result<()> {
     assert_eq!(state(&env, &c.account).await?, "funded");
     assert_eq!(balance(&env, &c.account).await?, 2 * USDC);
 
-    // The worker key works directly too, paying gas from its allowance.
+    // The worker key works directly too, paying gas from its 0.05 NEAR allowance.
+    // Prepaid gas is charged at a pessimistic price, so attach a realistic amount
+    // (300 Tgas would cost ~1 NEAR up front and exceed the allowance).
     ok(w.call(&c.account, "submit_delivery")
         .args_json(json!({ "hash": "direct" }))
-        .max_gas()
+        .gas(near_workspaces::types::Gas::from_tgas(10))
         .transact()
         .await?)?;
     assert_eq!(state(&env, &c.account).await?, "delivered");
