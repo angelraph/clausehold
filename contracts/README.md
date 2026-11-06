@@ -45,6 +45,8 @@ cd contracts && ./build.sh
 
 `build.sh` runs `cargo near build non-reproducible-wasm` for `clause`, `factory` and `mock-ft` and leaves the files at `target/near/<crate>/<crate>.wasm` (or under `$CARGO_TARGET_DIR/near/` if that is set).
 
+Without cargo-near (for example on Windows, where it needs OpenSSL to install), `build.sh` runs the same two steps itself: `cargo build --target wasm32-unknown-unknown --release` with `-C link-arg=-s --cfg near`, then `wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int`. That needs `rustup target add wasm32-unknown-unknown` and binaryen's `wasm-opt`. Rust 1.87+ emits bulk-memory opcodes, which nearcore 2.12+ (protocol 84) accepts on testnet and mainnet.
+
 ## Test
 
 ```bash
