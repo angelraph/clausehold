@@ -1,12 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { auditLog } from "../audit/log.js";
 import { config } from "../config.js";
-import { activeVenue } from "../venues/index.js";
 import { loadMandate } from "../mandate/store.js";
-import { assessProposal } from "../policy/assess.js";
-import { executeProposal } from "../execution/adapter.js";
-import type { Proposal, Verdict } from "../policy/types.js";
-import type { OrderResult } from "../venues/types.js";
+import { assessClause } from "../policy/assess.js";
+import type { ClauseProposal, Verdict } from "../policy/types.js";
 import { deriveApprovals, deriveKillSwitch, type ApprovalRecord, type ApprovalStatus, type KillSwitchState } from "./state.js";
 
 export class ApprovalNotFoundError extends Error {
@@ -28,7 +25,7 @@ export class ApprovalStateError extends Error {
 
 export class SelfApprovalError extends Error {
   constructor(approver: string) {
-    super(`"${approver}" submitted this proposal and cannot approve it. A different approver is required.`);
+    super(`"${approver}" proposed this clause and cannot approve it. A different approver is required.`);
     this.name = "SelfApprovalError";
   }
 }
@@ -36,7 +33,7 @@ export class SelfApprovalError extends Error {
 export class ApprovalBlockedError extends Error {
   constructor(public readonly verdict: Verdict) {
     const violated = verdict.reasons.filter((r) => r.outcome === "violated").map((r) => r.rule);
-    super(`Approval refused: on re-check against current conditions the proposal is now vetoed (${violated.join(", ")})`);
+    super(`Approval refused: on re-check against current conditions the clause is now vetoed (${violated.join(", ")})`);
     this.name = "ApprovalBlockedError";
   }
 }
@@ -48,10 +45,10 @@ export class AuditIntegrityError extends Error {
   }
 }
 
-export async function requestApproval(proposal: Proposal, verdict: Verdict): Promise<{ approvalId: string; expiresAt: string }> {
+export async function requestApproval(proposal: ClauseProposal, verdict: Verdict): Promise<{ approvalId: string; expiresAt: string }> {
   const approvalId = randomUUID();
   const expiresAt = new Date(Date.now() + config.approvalTtlMinutes * 60_000).toISOString();
-  await auditLog.append("APPROVAL_REQUESTED", activeVenue.name, { approvalId, proposal, verdict, expiresAt });
+  await auditLog.append("APPROVAL_REQUESTED", config.network, { approvalId, proposal, verdict, expiresAt });
   return { approvalId, expiresAt };
 }
 
@@ -84,7 +81,6 @@ async function recordExpiryIfNeeded(approvalId: string): Promise<void> {
 export interface ApprovalOutcome {
   record: ApprovalRecord;
   verdict: Verdict;
-  execution: OrderResult;
 }
 
 export async function approve(approvalId: string, approver: string, note?: string): Promise<ApprovalOutcome> {
@@ -101,10 +97,10 @@ export async function approve(approvalId: string, approver: string, note?: strin
     const integrity = await auditLog.verify();
     if (!integrity.ok) throw new AuditIntegrityError(`entry ${integrity.brokenAtSeq}: ${integrity.reason}`);
 
-    // Conditions may have changed since the proposal was escalated (market
-    // moved, daily cap used up, kill switch engaged). Evaluate again now.
+    // Conditions may have changed since the clause was escalated (daily cap
+    // used up, payee cap reached, kill switch engaged). Evaluate again now.
     const mandate = await loadMandate(record.proposal.mandateId);
-    const verdict = await assessProposal(record.proposal, mandate, { recheckOfApproval: approvalId });
+    const verdict = await assessClause(record.proposal, mandate, { recheckOfApproval: approvalId });
     if (verdict.decision === "VETO") {
       await auditLog.append("APPROVAL_REJECTED", "n/a", {
         approvalId,
@@ -114,9 +110,10 @@ export async function approve(approvalId: string, approver: string, note?: strin
       throw new ApprovalBlockedError(verdict);
     }
 
-    await auditLog.append("APPROVAL_GRANTED", activeVenue.name, { approvalId, approver, note });
-    const execution = await executeProposal(activeVenue, record.proposal, verdict, { approvalId, approver });
-    return { record: await getApproval(approvalId), verdict, execution };
+    await auditLog.append("APPROVAL_GRANTED", config.network, { approvalId, approver, note });
+    // Approved: the clause is now cleared to be written on chain.
+    await auditLog.append("CLAUSE_CLEARED", config.network, { proposal: record.proposal, verdictId: verdict.id, approvalId, approver });
+    return { record: await getApproval(approvalId), verdict };
   } finally {
     inFlight.delete(approvalId);
   }

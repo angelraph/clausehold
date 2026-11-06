@@ -1,19 +1,18 @@
 {
   "id": "b2f1e9a0-1a2b-4c3d-8e4f-000000000001",
   "version": 1,
-  "owner": "uzoechiraphael1@gmail.com",
-  "createdAt": "2026-09-02T00:00:00.000Z",
-  "subAccountId": "testnet-demo",
-  "naturalLanguageSource": "Hard cap of $300 per order. Anything over $50 needs my explicit confirmation. Daily spend cap $3000. No leverage (spot only). Halt all trading if the account drops 5% in a day. Only BTCUSDT and ETHUSDT. Buys only for the demo.",
+  "owner": "studio-dao.sputnik-dao.testnet",
+  "createdAt": "2026-11-06T00:00:00.000Z",
+  "factoryAccountId": "clausehold.testnet",
+  "naturalLanguageSource": "Stablecoins only. No clause above $25. Anything above $15 needs a second person. At most $50 to any one payee a day and $200 in total a day. A payee who has never delivered gets at most $10. A clause may stay open for at most a week.",
   "limits": {
-    "perTradeMaxUsd": 300,
-    "dailySpendCapUsd": 3000,
-    "maxLeverage": 1,
-    "dailyDrawdownHaltPct": 5,
-    "confirmAboveUsd": 50,
-    "allowedSymbols": ["BTCUSDT", "ETHUSDT"],
-    "allowedSides": ["BUY"],
-    "maxSlippageBps": 50
+    "maxPerClause": 25,
+    "dailySpendCap": 200,
+    "perPayeeDailyCap": 50,
+    "newPayeeCeiling": 10,
+    "confirmAbove": 15,
+    "allowedAssets": ["USDC", "USDT"],
+    "maxDeadlineMinutes": 10080
   },
   "status": "active"
 }

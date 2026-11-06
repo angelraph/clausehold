@@ -11,7 +11,7 @@ function printKey(action: string, agentId: string, mandateIds: string[], key: st
   console.log(`  API key: ${key}`);
   console.log("");
   console.log("This is the only time the key is shown. Only its hash is stored, so it cannot be recovered.");
-  console.log("The agent sends it as the X-Charter-Api-Key header. Its identity comes from the key, not from the request body.");
+  console.log("The agent sends it as the X-Clausehold-Api-Key header. Its identity comes from the key, not from the request body.");
 }
 
 export async function agentAddCommand(agentId: string, mandateIds: string[], by?: string): Promise<void> {

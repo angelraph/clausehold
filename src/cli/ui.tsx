@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { render, Box, Text } from "ink";
-import { activeVenue, marketDataBaseUrl } from "../venues/index.js";
-import { computeApproxNavUsd } from "../market/nav.js";
 import { auditLog, type AuditEntry } from "../audit/log.js";
 import { loadMandate } from "../mandate/store.js";
 import type { Mandate } from "../mandate/schema.js";
+import type { Verdict } from "../policy/types.js";
 import { deriveApprovals, deriveKillSwitch, type ApprovalRecord, type KillSwitchState } from "../approval/state.js";
+import { config } from "../config.js";
+import { DEMO_MANDATE_ID } from "../api/server.js";
 
-const DEMO_MANDATE_ID = "b2f1e9a0-1a2b-4c3d-8e4f-000000000001";
 const POLL_MS = 4000;
 
 function decisionColor(decision: string): string {
@@ -19,22 +19,24 @@ function decisionColor(decision: string): string {
 
 function verdictLine(e: AuditEntry): { text: string; color: string } | null {
   if (e.type !== "VERDICT_ISSUED") return null;
-  const payload = e.payload as { verdict: { decision: string; proposalId: string; simulation: { notionalUsd: number } } };
+  const { verdict } = e.payload as { verdict: Verdict };
   return {
-    text: `#${e.seq} ${e.timestamp.slice(11, 19)}  ${payload.verdict.decision.padEnd(8)} $${payload.verdict.simulation.notionalUsd.toFixed(2).padStart(8)}  proposal ${payload.verdict.proposalId.slice(0, 8)}`,
-    color: decisionColor(payload.verdict.decision),
+    text: `#${e.seq} ${e.timestamp.slice(11, 19)}  ${verdict.decision.padEnd(8)} ${String(verdict.amount).padStart(8)} ${verdict.asset}  clause ${verdict.proposalId.slice(0, 8)}`,
+    color: decisionColor(verdict.decision),
   };
 }
 
-function fillLine(e: AuditEntry): string | null {
-  if (e.type !== "EXECUTION_FILLED" && e.type !== "EXECUTION_PLACED") return null;
-  const p = e.payload as { orderId: string; symbol: string; side: string; executedQty: number; notionalUsd: number };
-  return `#${e.seq} ${e.timestamp.slice(11, 19)}  ${e.type === "EXECUTION_PLACED" ? "RESTING" : "FILLED "}  ${p.side} ${p.executedQty} ${p.symbol}  ($${p.notionalUsd.toFixed(2)})  order ${p.orderId}`;
+const LIFECYCLE = new Set(["CLAUSE_CLEARED", "CLAUSE_CREATED", "CLAUSE_FUNDED", "CLAUSE_DELIVERED", "CLAUSE_RELEASED", "CLAUSE_RETURNED", "CLAUSE_FROZEN"]);
+
+function lifecycleLine(e: AuditEntry): string | null {
+  if (!LIFECYCLE.has(e.type)) return null;
+  const p = e.payload as { proposal?: { id: string; payee: string; amount: number; asset: string }; account?: string };
+  const what = p.proposal ? `${p.proposal.amount} ${p.proposal.asset} to ${p.proposal.payee}` : (p.account ?? "");
+  return `#${e.seq} ${e.timestamp.slice(11, 19)}  ${e.type.replace("CLAUSE_", "").padEnd(9)} ${what}`;
 }
 
 const App: React.FC = () => {
   const [mandate, setMandate] = useState<Mandate | null>(null);
-  const [navUsd, setNavUsd] = useState<number | null>(null);
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -45,15 +47,10 @@ const App: React.FC = () => {
     let cancelled = false;
     async function poll() {
       try {
-        const [m, nav, all] = await Promise.all([
-          loadMandate(DEMO_MANDATE_ID).catch(() => null),
-          computeApproxNavUsd(activeVenue, marketDataBaseUrl()),
-          auditLog.all(),
-        ]);
+        const [m, all] = await Promise.all([loadMandate(DEMO_MANDATE_ID).catch(() => null), auditLog.all()]);
         if (cancelled) return;
         setMandate(m);
-        setNavUsd(nav);
-        setEntries(all.slice(-15));
+        setEntries(all.slice(-20));
         setKillSwitch(deriveKillSwitch(all));
         setPending([...deriveApprovals(all).values()].filter((r) => r.status === "pending"));
         setError(null);
@@ -73,50 +70,45 @@ const App: React.FC = () => {
   }, []);
 
   const verdicts = entries.map(verdictLine).filter((v): v is { text: string; color: string } => v !== null);
-  const fills = entries.map(fillLine).filter((f): f is string => f !== null);
+  const lifecycle = entries.map(lifecycleLine).filter((l): l is string => l !== null);
 
   return (
     <Box flexDirection="column" paddingX={1}>
       <Text bold color="cyan">
-        CHARTER ops console ({activeVenue.name}), refresh #{tick}
+        Clausehold desk ({config.network}, {config.factoryAccountId}), refresh #{tick}
       </Text>
-      <Text dimColor>Nothing reaches Binance until it survives your charter.</Text>
+      <Text dimColor>The money is held under a clause, and the clause is the only key that moves it.</Text>
       <Box marginTop={1} flexDirection="column">
         {error && <Text color="red">Error: {error}</Text>}
         {killSwitch.engaged && (
           <Box borderStyle="bold" borderColor="red" paddingX={1} marginBottom={1}>
             <Text bold color="red">
-              TRADING HALTED{killSwitch.by ? ` by ${killSwitch.by}` : ""}{killSwitch.reason ? `: ${killSwitch.reason}` : ""}. Every proposal is vetoed until released.
+              NEW CLAUSES HALTED{killSwitch.by ? ` by ${killSwitch.by}` : ""}{killSwitch.reason ? `: ${killSwitch.reason}` : ""}.
             </Text>
           </Box>
         )}
         {pending.length > 0 && (
           <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginBottom={1}>
-            <Text bold color="yellow">Waiting on a human ({pending.length})</Text>
+            <Text bold color="yellow">Waiting on a second person ({pending.length})</Text>
             {pending.map((r) => (
               <Text key={r.approvalId} color="yellow">
-                {r.approvalId.slice(0, 8)}  {r.proposal.side} ${r.verdict.simulation.notionalUsd.toFixed(2)} {r.proposal.symbol}  from {r.proposal.agentId}  expires {r.expiresAt.slice(11, 19)}
+                {r.approvalId.slice(0, 8)}  {r.proposal.amount} {r.proposal.asset} to {r.proposal.payee}  from {r.proposal.agentId}  expires {r.expiresAt.slice(11, 19)}
               </Text>
             ))}
           </Box>
         )}
         {mandate && (
           <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
-            <Text bold>Mandate {mandate.id.slice(0, 8)} ({mandate.status})</Text>
+            <Text bold>Mandate {mandate.id.slice(0, 8)} ({mandate.status}), set by {mandate.owner}</Text>
             <Text>
-              perTradeMax ${mandate.limits.perTradeMaxUsd}  dailyCap ${mandate.limits.dailySpendCapUsd}  confirmAbove ${mandate.limits.confirmAboveUsd}  drawdownHalt {mandate.limits.dailyDrawdownHaltPct}%
+              maxPerClause {mandate.limits.maxPerClause}  confirmAbove {mandate.limits.confirmAbove}  perPayee/day {mandate.limits.perPayeeDailyCap}  newPayee {mandate.limits.newPayeeCeiling}
             </Text>
-            <Text dimColor>symbols: {mandate.limits.allowedSymbols?.join(", ") ?? "any"} | sides: {mandate.limits.allowedSides?.join(", ") ?? "any"}</Text>
+            <Text dimColor>assets: {mandate.limits.allowedAssets.join(", ")}</Text>
           </Box>
         )}
-        <Box marginBottom={1}>
-          <Text>
-            Approx NAV: <Text bold color="green">{navUsd !== null ? `$${navUsd.toFixed(2)}` : "…"}</Text>
-          </Text>
-        </Box>
         <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1} marginBottom={1}>
-          <Text bold>Verdict feed (last {verdicts.length})</Text>
-          {verdicts.length === 0 && <Text dimColor>No verdicts yet. Run `charter propose` or the rogue-agent.</Text>}
+          <Text bold>Verdicts (last {verdicts.length})</Text>
+          {verdicts.length === 0 && <Text dimColor>No verdicts yet. Run `clausehold clause` or the studio agent.</Text>}
           {verdicts.map((v, i) => (
             <Text key={i} color={v.color}>
               {v.text}
@@ -124,17 +116,17 @@ const App: React.FC = () => {
           ))}
         </Box>
         <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1}>
-          <Text bold>Real fills (last {fills.length})</Text>
-          {fills.length === 0 && <Text dimColor>No fills yet.</Text>}
-          {fills.map((f, i) => (
+          <Text bold>Clause lifecycle (last {lifecycle.length})</Text>
+          {lifecycle.length === 0 && <Text dimColor>No clauses yet.</Text>}
+          {lifecycle.map((l, i) => (
             <Text key={i} color="green">
-              {f}
+              {l}
             </Text>
           ))}
         </Box>
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>Ctrl+C to exit. Polling every {POLL_MS / 1000}s from the real audit log + live venue.</Text>
+        <Text dimColor>Ctrl+C to exit. Polling every {POLL_MS / 1000}s from the audit log.</Text>
       </Box>
     </Box>
   );

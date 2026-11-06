@@ -1,8 +1,6 @@
 import { userInfo } from "node:os";
 import { approve, engageKillSwitch, getKillSwitch, listApprovals, reject, releaseKillSwitch } from "../../approval/service.js";
 import type { ApprovalStatus } from "../../approval/state.js";
-import { activeVenue } from "../../venues/index.js";
-import { cancelAllCharterOrders, cancelCharterOrder, listOpenCharterOrders } from "../../execution/orders.js";
 
 /** The CLI runs with local access to the audit log, so the operator's OS username is the default identity. */
 function operator(explicit?: string): string {
@@ -22,7 +20,7 @@ export async function approvalsListCommand(status?: string): Promise<void> {
   for (const r of records) {
     const who = r.resolvedBy ? ` by ${r.resolvedBy}` : "";
     console.log(
-      `${r.approvalId}  ${r.status.toUpperCase()}${who}  ${r.proposal.side} $${r.verdict.simulation.notionalUsd.toFixed(2)} ${r.proposal.symbol}  ` +
+      `${r.approvalId}  ${r.status.toUpperCase()}${who}  ${r.proposal.amount} ${r.proposal.asset} to ${r.proposal.payee}  ` +
         `from ${r.proposal.agentId}  requested ${r.requestedAt}  expires ${r.expiresAt}`
     );
   }
@@ -30,51 +28,27 @@ export async function approvalsListCommand(status?: string): Promise<void> {
 
 export async function approveCommand(approvalId: string, approver: string | undefined, note?: string): Promise<void> {
   const who = operator(approver);
-  const { execution, verdict } = await approve(approvalId, who, note);
-  console.log(`Approved by ${who}. Re-checked against current conditions: ${verdict.decision}.`);
-  console.log(`Filled: orderId=${execution.orderId} status=${execution.status} executedQty=${execution.executedQty} quoteQty=${execution.cummulativeQuoteQty}`);
+  const { verdict } = await approve(approvalId, who, note);
+  console.log(`Approved by ${who}. Re-checked against current conditions: ${verdict.decision}. The clause is cleared to be written.`);
 }
 
 export async function rejectCommand(approvalId: string, approver: string | undefined, note?: string): Promise<void> {
   const who = operator(approver);
   await reject(approvalId, who, note);
-  console.log(`Rejected by ${who}. Nothing was placed.`);
+  console.log(`Rejected by ${who}. Nothing will be written.`);
 }
 
-export async function haltCommand(by: string | undefined, reason?: string, cancelOpen = false): Promise<void> {
+export async function haltCommand(by: string | undefined, reason?: string): Promise<void> {
   const who = operator(by);
   await engageKillSwitch(who, reason);
-  console.log(`Kill switch ENGAGED by ${who}. Every proposal is now vetoed until it is released.`);
-  if (cancelOpen) {
-    const { cancelled, failed } = await cancelAllCharterOrders(activeVenue, who, reason ?? "kill switch");
-    console.log(`Cancelled ${cancelled.length} resting CHARTER order${cancelled.length === 1 ? "" : "s"}.`);
-    for (const f of failed) console.log(`  could not cancel ${f.order.symbol} ${f.order.orderId}: ${f.error}`);
-  } else {
-    console.log("Any order already resting on the book stays there. Add --cancel-open to pull them.");
-  }
-}
-
-export async function ordersCommand(): Promise<void> {
-  const orders = await listOpenCharterOrders(activeVenue);
-  if (orders.length === 0) {
-    console.log("No CHARTER orders are resting on the book.");
-    return;
-  }
-  for (const o of orders) {
-    console.log(`${o.symbol}  ${o.orderId}  ${o.side} ${o.origQty} @ ${o.price}  ${o.status}  filled ${o.executedQty}`);
-  }
-}
-
-export async function cancelCommand(symbol: string, orderId: string, by: string | undefined, reason?: string): Promise<void> {
-  const who = operator(by);
-  await cancelCharterOrder(activeVenue, symbol.toUpperCase(), orderId, who, reason);
-  console.log(`Cancelled ${symbol.toUpperCase()} order ${orderId}. Recorded as cancelled by ${who}.`);
+  console.log(`Kill switch ENGAGED by ${who}. No new clause is written until it is released.`);
+  console.log("Clauses already on chain keep their own terms: they still release on delivery or return on expiry.");
 }
 
 export async function resumeCommand(by: string | undefined): Promise<void> {
   const who = operator(by);
   await releaseKillSwitch(who);
-  console.log(`Kill switch released by ${who}. Proposals are evaluated normally again.`);
+  console.log(`Kill switch released by ${who}. Clauses are checked normally again.`);
 }
 
 export async function controlStatusCommand(): Promise<void> {

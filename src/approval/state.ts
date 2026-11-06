@@ -1,5 +1,5 @@
 import type { AuditEntry } from "../audit/log.js";
-import type { Proposal, Verdict } from "../policy/types.js";
+import type { ClauseProposal, Verdict } from "../policy/types.js";
 
 /**
  * Approval and kill-switch state is derived from the audit log rather than
@@ -12,7 +12,7 @@ export type ApprovalStatus = "pending" | "granted" | "rejected" | "expired";
 
 export interface ApprovalRecord {
   approvalId: string;
-  proposal: Proposal;
+  proposal: ClauseProposal;
   verdict: Verdict;
   requestedAt: string;
   expiresAt: string;
@@ -24,7 +24,7 @@ export interface ApprovalRecord {
 
 interface RequestedPayload {
   approvalId: string;
-  proposal: Proposal;
+  proposal: ClauseProposal;
   verdict: Verdict;
   expiresAt: string;
 }
