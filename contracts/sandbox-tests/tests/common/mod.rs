@@ -45,6 +45,12 @@ macro_rules! with_worker {
     };
 }
 
+/// rpc.testnet.near.org rate-limits hard; FastNEAR's public endpoint copes
+/// with a test run. Override with CLAUSEHOLD_TESTNET_RPC.
+pub fn testnet_rpc() -> String {
+    std::env::var("CLAUSEHOLD_TESTNET_RPC").unwrap_or_else(|_| "https://test.rpc.fastnear.com".into())
+}
+
 pub fn on_testnet() -> bool {
     std::env::var("CLAUSEHOLD_NETWORK").map(|v| v == "testnet").unwrap_or(false)
 }
@@ -86,28 +92,31 @@ async fn sub(parent: &Account, name: &str, near: NearToken) -> Result<Account> {
 }
 
 pub async fn setup() -> Result<Env> {
-    let (net, factory_acc, ft_acc, desk, small) = if on_testnet() {
-        // Three faucet-funded dev accounts (~10 NEAR each). Everyone else is
-        // a cheap sub-account of the desk.
-        let w = near_workspaces::testnet().await?;
+    // `bank` funds the helper accounts; `desk` keeps its NEAR for clause
+    // deposits. On testnet a max-gas tx reserves ~1 NEAR up front, so helpers
+    // get 1.5 NEAR and the DAO (which uploads the 180 KB clause wasm) 2 NEAR.
+    let (net, factory_acc, ft_acc, desk, bank, small, dao_near) = if on_testnet() {
+        let w = near_workspaces::testnet().rpc_addr(&testnet_rpc()).await?;
         let factory_acc = w.dev_create_account().await?;
         let ft_acc = w.dev_create_account().await?;
         let desk = w.dev_create_account().await?;
-        (Net::Testnet(w), factory_acc, ft_acc, desk, NearToken::from_millinear(300))
+        let bank = w.dev_create_account().await?;
+        (Net::Testnet(w), factory_acc, ft_acc, desk, bank, NearToken::from_millinear(1_400), NearToken::from_near(2))
     } else {
         let w = near_workspaces::sandbox().await?;
         let root = w.root_account()?;
         let factory_acc = sub(&root, "clausehold", NearToken::from_near(60)).await?;
         let ft_acc = sub(&root, "usdc", NearToken::from_near(20)).await?;
         let desk = sub(&root, "desk", NearToken::from_near(60)).await?;
-        (Net::Sandbox(w), factory_acc, ft_acc, desk, NearToken::from_near(20))
+        let bank = sub(&root, "bank", NearToken::from_near(200)).await?;
+        (Net::Sandbox(w), factory_acc, ft_acc, desk, bank, NearToken::from_near(20), NearToken::from_near(20))
     };
-    let dao = sub(&desk, "dao", small).await?;
-    let buyer = sub(&desk, "buyer", small).await?;
-    let payee = sub(&desk, "payee", small).await?;
-    let relayer = sub(&desk, "relayer", small).await?;
-    let cosigner = sub(&desk, "cosigner", small).await?;
-    let stranger = sub(&desk, "stranger", small).await?;
+    let dao = sub(&bank, "dao", dao_near).await?;
+    let buyer = sub(&bank, "buyer", small).await?;
+    let payee = sub(&bank, "payee", small).await?;
+    let relayer = sub(&bank, "relayer", small).await?;
+    let cosigner = sub(&bank, "cosigner", small).await?;
+    let stranger = sub(&bank, "stranger", small).await?;
 
     let ft = ft_acc.deploy(&wasm("mock-ft")).await?.into_result()?;
     ok(ft.call("new").transact().await?)?;
@@ -137,8 +146,7 @@ impl Env {
     pub fn rpc_addr(&self) -> String {
         match &self.net {
             Net::Sandbox(w) => w.rpc_addr(),
-            Net::Testnet(_) => std::env::var("CLAUSEHOLD_TESTNET_RPC")
-                .unwrap_or_else(|_| near_workspaces::network::testnet::RPC_URL.to_string()),
+            Net::Testnet(_) => testnet_rpc(),
         }
     }
 
