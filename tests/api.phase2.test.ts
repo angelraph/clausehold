@@ -80,6 +80,8 @@ function proposal(amount = 2) {
 function mockDecision(decision: "PASS" | "VETO" | "ESCALATE", amount = 2) {
   const p = proposal(amount);
   vi.mocked(runClause).mockImplementation(async () => {
+    // Like the real pipeline: the proposal is recorded first, then the outcome.
+    store.entries.push({ seq: store.entries.length, timestamp: new Date().toISOString(), type: "CLAUSE_PROPOSED", network: "testnet", payload: { proposal: p }, prevHash: "x", hash: "y" });
     if (decision === "PASS") store.entries.push({ seq: store.entries.length, timestamp: new Date().toISOString(), type: "CLAUSE_CLEARED", network: "testnet", payload: { proposal: p }, prevHash: "x", hash: "y" });
     return { proposal: p, verdict: { decision, reasons: [] }, cleared: decision === "PASS", approval: decision === "ESCALATE" ? { approvalId: "ap1", expiresAt: "later" } : undefined } as never;
   });
@@ -245,7 +247,7 @@ describe("POST /relay", () => {
   it("relays and records the delivery", async () => {
     await start({ relay: async () => ({ txHash: "TXD", senderId: "r-104.clausehold.testnet" }) });
     const res = await fetch(`${base}/relay`, { method: "POST", headers: json, body: JSON.stringify({ signedDelegate: "x".repeat(20) }) });
-    expect(await res.json()).toEqual({ txHash: "TXD", senderId: "r-104.clausehold.testnet" });
+    expect(await res.json()).toMatchObject({ txHash: "TXD", senderId: "r-104.clausehold.testnet", status: "CLAUSE_DELIVERED" });
     expect(store.entries.find((e) => e.type === "CLAUSE_DELIVERED")?.payload).toMatchObject({ txHash: "TXD" });
   });
 
@@ -258,5 +260,56 @@ describe("POST /relay", () => {
     const res = await fetch(`${base}/relay`, { method: "POST", headers: json, body: JSON.stringify({ signedDelegate: "x".repeat(20) }) });
     expect(res.status).toBe(422);
     expect(store.entries).toHaveLength(0);
+  });
+});
+
+describe("chain actions", () => {
+  const chainAt = (state: string) => ({
+    view: vi.fn(async () => state),
+    accessKeyNonce: vi.fn(async () => 41n),
+    finalHeight: vi.fn(async () => 1000n),
+  });
+
+  it("GET /relay/prepare gives the next nonce and a height the delegate stays valid until", async () => {
+    await start({ chain: chainAt("funded") as never });
+    const res = await fetch(`${base}/relay/prepare?clause=r-104.clausehold.testnet&publicKey=ed25519:abc`);
+    expect(await res.json()).toEqual({ nonce: "42", maxBlockHeight: "1600" });
+  });
+
+  it("GET /relay/prepare refuses anything that is not a clause account", async () => {
+    await start({ chain: chainAt("funded") as never });
+    expect((await fetch(`${base}/relay/prepare?clause=alice.testnet&publicKey=ed25519:abc`)).status).toBe(400);
+  });
+
+  it("the desk shows a clause as funded once the chain says so", async () => {
+    await start({ writer, chain: chainAt("funded") as never });
+    await openAndBind();
+    const rows = (await (await fetch(`${base}/desk/clauses`, { headers: AGENT })).json()) as Array<{ lastEvent: string }>;
+    expect(rows[0]!.lastEvent).toBe("CLAUSE_FUNDED");
+  });
+
+  it("a relayed delivery that paid out at once is reported as released", async () => {
+    await start({ writer, chain: chainAt("released") as never, relay: async () => ({ txHash: "TXD", senderId: "r-104.clausehold.testnet" }) });
+    await openAndBind();
+    const res = await fetch(`${base}/relay`, { method: "POST", headers: json, body: JSON.stringify({ signedDelegate: "x".repeat(20) }) });
+    expect(((await res.json()) as { status: string }).status).toBe("CLAUSE_RELEASED");
+    expect(store.entries.find((e) => e.type === "CLAUSE_RELEASED")?.payload).toMatchObject({ payee: "editor.testnet" });
+  });
+
+  it("check-funding and return need the agent key and a service account", async () => {
+    await start({ writer, chain: chainAt("open") as never });
+    const { proposalId } = await openAndBind();
+    expect((await fetch(`${base}/clauses/${proposalId}/check-funding`, { method: "POST" })).status).toBe(401);
+    expect((await fetch(`${base}/clauses/${proposalId}/check-funding`, { method: "POST", headers: AGENT })).status).toBe(503);
+  });
+
+  it("return explains a deadline that has not passed instead of a raw panic", async () => {
+    const caller = { call: vi.fn(async () => { throw new Error("Smart contract panicked: NOT_EXPIRED"); }) };
+    await start({ writer, chain: chainAt("open") as never, caller });
+    const { proposalId } = await openAndBind();
+    const res = await fetch(`${base}/clauses/${proposalId}/return`, { method: "POST", headers: AGENT });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: string }).error).toBe("The deadline has not passed yet");
+    expect(caller.call).toHaveBeenCalledWith("r-104.clausehold.testnet", "expire", {}, 150_000_000_000_000n);
   });
 });

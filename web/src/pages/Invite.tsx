@@ -5,6 +5,8 @@ import { StatusChip } from "../components/Status";
 import { LogoMark } from "../components/Logo";
 import { api, ApiError, type InviteView } from "../lib/api";
 import { createWorkerKey, ed25519Supported, loadWorkerKey, type WorkerKey } from "../lib/workerKey";
+import { hashFile, hashText, submitDelivery } from "../lib/deliver";
+import { explorerAccount, useNetwork } from "../lib/network";
 
 /**
  * The page the person being paid opens. No wallet, no sign-up: their
@@ -91,11 +93,68 @@ export default function Invite() {
               {inv.status === "written" && !key && (
                 <div className="notice">This key was created in another browser. Open the link there to deliver.</div>
               )}
+              {inv.status === "written" && key && inv.clauseAccountId && (
+                <Deliver clauseAccountId={inv.clauseAccountId} workerKey={key} chainStatus={inv.chainStatus ?? null} onDone={refresh} />
+              )}
             </div>
           )}
         </div>
       )}
       {!inv && !error && <p className="faint" style={{ textAlign: "center" }}>Loading the job</p>}
+    </div>
+  );
+}
+
+function Deliver({ clauseAccountId, workerKey, chainStatus, onDone }: { clauseAccountId: string; workerKey: WorkerKey; chainStatus: string | null; onDone: () => void }) {
+  const { network } = useNetwork();
+  const [file, setFile] = useState<File | null>(null);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<{ txHash: string; status: string } | null>(null);
+
+  if (chainStatus === "CLAUSE_RELEASED") {
+    return <div className="notice notice-green">Paid. The money has been released to you, and the receipt is public.</div>;
+  }
+  if (chainStatus === "CLAUSE_RETURNED") {
+    return <div className="notice">This clause expired before delivery, so the money went back to the buyer.</div>;
+  }
+  if (chainStatus === "CLAUSE_DELIVERED" || chainStatus === "CLAUSE_FROZEN") {
+    return <div className="notice notice-violet">Delivered. The money releases when the review window ends.</div>;
+  }
+  if (chainStatus !== "CLAUSE_FUNDED") {
+    return <div className="notice">Waiting for the buyer to fund the clause. You can deliver as soon as it shows Funded.</div>;
+  }
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    try {
+      const hash = file ? await hashFile(file) : await hashText(text.trim());
+      const r = await submitDelivery(clauseAccountId, workerKey, hash);
+      setDone(r);
+      onDone();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 12, marginTop: 6 }}>
+      <h2 className="h3">Deliver the work</h2>
+      <p className="muted" style={{ margin: 0, fontSize: 14 }}>Pick the finished file, or paste a link to it. Only its fingerprint (a sha256 hash) goes on chain; the file stays with you.</p>
+      <input className="input" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+      {!file && <input className="input" placeholder="Or a link, e.g. https://drive.example/cut-30s.mp4" value={text} onChange={(e) => setText(e.target.value)} />}
+      <button className="btn btn-primary" onClick={send} disabled={busy || (!file && !text.trim())}>{busy ? "Signing and sending" : "Submit delivery"}</button>
+      <p className="faint" style={{ fontSize: 13, margin: 0 }}>Signed with your key in this browser. Clausehold pays the network fee.</p>
+      {error && <div className="notice notice-red">{error}</div>}
+      {done && (
+        <div className="notice notice-green">
+          Delivered{done.status === "CLAUSE_RELEASED" ? " and paid" : ""}. <a className="link-arrow" href={explorerAccount(network, clauseAccountId)} target="_blank" rel="noreferrer">See it on the explorer</a>
+        </div>
+      )}
     </div>
   );
 }

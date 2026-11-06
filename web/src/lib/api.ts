@@ -110,6 +110,8 @@ export interface InviteView {
   keySource: "passkey-prf" | "browser-random" | null;
   clauseAccountId: string | null;
   createTxHash: string | null;
+  /** The clause's last state seen on chain, e.g. CLAUSE_FUNDED. */
+  chainStatus?: string | null;
 }
 
 export interface OpenInviteResult {
@@ -161,7 +163,11 @@ export const api = {
       `/clauses/${encodeURIComponent(proposalId)}/fund/quote`,
       { method: "POST", body: JSON.stringify(body) }
     ),
-  relay: (signedDelegate: string) => call<{ txHash: string; senderId: string }>("/relay", { method: "POST", body: JSON.stringify({ signedDelegate }) }),
+  relay: (signedDelegate: string) => call<{ txHash: string; senderId: string; status: string }>("/relay", { method: "POST", body: JSON.stringify({ signedDelegate }) }),
+  prepareRelay: (clause: string, publicKey: string) =>
+    call<{ nonce: string; maxBlockHeight: string }>(`/relay/prepare?clause=${encodeURIComponent(clause)}&publicKey=${encodeURIComponent(publicKey)}`),
+  checkFunding: (proposalId: string) => call<{ txHash: string; status: string }>(`/clauses/${encodeURIComponent(proposalId)}/check-funding`, { method: "POST", auth: true }),
+  returnToBuyer: (proposalId: string) => call<{ txHash: string; status: string }>(`/clauses/${encodeURIComponent(proposalId)}/return`, { method: "POST", auth: true }),
 };
 
 export function statusOf(c: DeskClause): "refused" | "awaiting" | "open" | "funded" | "delivered" | "released" | "returned" | "frozen" {

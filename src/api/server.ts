@@ -33,7 +33,9 @@ import {
   writeIfReady,
 } from "../invites/service.js";
 import type { ClauseWriter } from "../near/clauseWriter.js";
-import { deriveDesk } from "../desk/view.js";
+import { deriveDesk, type DeskClause } from "../desk/view.js";
+import { isTerminal, syncClauseFromChain } from "../desk/chainSync.js";
+import type { ChainCaller, ChainReader } from "../near/chain.js";
 import { OneClickError, assertQuoteFundsClause, buildClauseFundingQuote, findToken, type OneClickClient } from "../near/intents.js";
 import { RelayRefusedError, type RelayResult } from "../near/relayer.js";
 import { assetFor, networkProfile, toBaseUnits } from "../near/network.js";
@@ -47,7 +49,14 @@ export interface ApiDeps {
   writer?: ClauseWriter;
   oneClick?: OneClickClient;
   relay?: (signedDelegateBase64: string) => Promise<RelayResult>;
+  /** Free reads from the chain, for clause state and the payee's key nonce. */
+  chain?: ChainReader;
+  /** Calls signed by the service account: sync_funding and expire. */
+  caller?: ChainCaller;
 }
+
+const SYNC_FUNDING_GAS = 100_000_000_000_000n;
+const EXPIRE_GAS = 150_000_000_000_000n;
 
 export const DEMO_MANDATE_ID = "b2f1e9a0-1a2b-4c3d-8e4f-000000000001";
 
@@ -87,6 +96,7 @@ function isPublicRoute(method: string, path: string): boolean {
   if (method === "GET" && /^\/funding\/[^/]+$/.test(path)) return true;
   if (method === "POST" && path === "/relay") return true;
   if (method === "GET" && path === "/network") return true;
+  if (method === "GET" && path === "/relay/prepare") return true;
   return false;
 }
 const HaltBodySchema = z.object({ reason: z.string().optional() });
@@ -193,6 +203,20 @@ export function createApp(deps: ApiDeps = {}): express.Express {
   // In-memory index of recent results for GET /clauses/:id. The audit log
   // remains the durable source of truth; this is just a fast lookup cache.
   const recent = new Map<string, RunClauseResult>();
+
+  /** Brings one clause's desk record up to date with its contract. Best effort: a read failure leaves it as it was. */
+  async function syncRow(row: DeskClause): Promise<void> {
+    if (!deps.chain || !row.clauseAccountId || isTerminal(row.lastEvent)) return;
+    try {
+      await syncClauseFromChain(deps.chain, { clauseAccountId: row.clauseAccountId, payee: row.proposal.payee, buyer: row.proposal.buyer, lastEvent: row.lastEvent });
+    } catch {
+      /* the chain is unreachable or the clause is not deployed; show the last known state */
+    }
+  }
+
+  async function findRow(pred: (r: DeskClause) => boolean): Promise<DeskClause | undefined> {
+    return deriveDesk(await auditLog.all()).find(pred);
+  }
 
   const approver = (req: Request): string => req.get("X-Clausehold-Approver") as string;
 
@@ -352,6 +376,7 @@ export function createApp(deps: ApiDeps = {}): express.Express {
 
   app.get("/desk/clauses", async (_req: Request, res: Response) => {
     const agent = res.locals.agent as AgentRecord | undefined;
+    for (const row of deriveDesk(await auditLog.all())) await syncRow(row);
     const rows = deriveDesk(await auditLog.all());
     // A registered agent sees only its own clauses.
     res.json(agent ? rows.filter((r) => r.proposal.agentId === agent.agentId) : rows);
@@ -411,7 +436,11 @@ export function createApp(deps: ApiDeps = {}): express.Express {
 
   app.get("/invites/:id", async (req: Request, res: Response) => {
     try {
-      res.json(publicInviteView(await getInvite(req.params.id as string)));
+      const invite = await getInvite(req.params.id as string);
+      const row = await findRow((r) => r.proposal.id === invite.proposal.id);
+      if (row) await syncRow(row);
+      const fresh = row ? await findRow((r) => r.proposal.id === invite.proposal.id) : undefined;
+      res.json({ ...publicInviteView(invite), chainStatus: fresh?.lastEvent ?? null });
     } catch (err) {
       if (err instanceof InviteNotFoundError) {
         res.status(404).json({ error: "Unknown invite" });
@@ -528,6 +557,53 @@ export function createApp(deps: ApiDeps = {}): express.Express {
     }
   });
 
+  // ---- Chain actions on a clause ----
+
+  /** What the payee's browser needs to sign a delivery: the key's next nonce and a block height the delegate stays valid until. */
+  app.get("/relay/prepare", async (req: Request, res: Response) => {
+    const clause = String(req.query.clause ?? "");
+    const publicKey = String(req.query.publicKey ?? "");
+    if (!deps.chain) {
+      res.status(503).json({ error: "This desk cannot read the chain" });
+      return;
+    }
+    if (!/^r-\d+\./.test(clause) || !publicKey.startsWith("ed25519:")) {
+      res.status(400).json({ error: "clause and publicKey are required" });
+      return;
+    }
+    try {
+      const [nonce, height] = await Promise.all([deps.chain.accessKeyNonce(clause, publicKey), deps.chain.finalHeight()]);
+      res.json({ nonce: (nonce + 1n).toString(), maxBlockHeight: (height + 600n).toString() });
+    } catch {
+      res.status(404).json({ error: "That key is not on that clause account" });
+    }
+  });
+
+  const clauseAction = (method: "sync_funding" | "expire", gas: bigint) => async (req: Request, res: Response) => {
+    if (!deps.caller) {
+      res.status(503).json({ error: "No service account is configured on this desk" });
+      return;
+    }
+    const row = await findRow((r) => r.proposal.id === req.params.id);
+    if (!row?.clauseAccountId) {
+      res.status(409).json({ error: "This clause is not on chain yet" });
+      return;
+    }
+    try {
+      const { txHash } = await deps.caller.call(row.clauseAccountId, method, {}, gas);
+      await syncRow(row);
+      const after = await findRow((r) => r.proposal.id === req.params.id);
+      res.json({ txHash, status: after?.lastEvent ?? row.lastEvent });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const reason = /NOT_EXPIRED/.test(msg) ? "The deadline has not passed yet" : /NOT_EXPIRABLE/.test(msg) ? "This clause was already delivered or settled" : msg;
+      res.status(422).json({ error: reason });
+    }
+  };
+
+  app.post("/clauses/:id/check-funding", clauseAction("sync_funding", SYNC_FUNDING_GAS));
+  app.post("/clauses/:id/return", clauseAction("expire", EXPIRE_GAS));
+
   // ---- Gasless delivery ----
 
   app.post("/relay", async (req: Request, res: Response) => {
@@ -543,7 +619,11 @@ export function createApp(deps: ApiDeps = {}): express.Express {
     try {
       const result = await deps.relay(body.data.signedDelegate);
       await auditLog.append("CLAUSE_DELIVERED", config.network, { clauseAccountId: result.senderId, txHash: result.txHash, relayed: true });
-      res.json(result);
+      // With no review window the clause pays out in the same call; record it.
+      const row = await findRow((r) => r.clauseAccountId === result.senderId);
+      if (row) await syncRow(row);
+      const after = await findRow((r) => r.clauseAccountId === result.senderId);
+      res.json({ ...result, status: after?.lastEvent ?? "CLAUSE_DELIVERED" });
     } catch (err) {
       if (err instanceof RelayRefusedError) {
         res.status(422).json({ error: err.message });

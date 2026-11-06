@@ -5,6 +5,7 @@ import { OneClickClient } from "../near/intents.js";
 import { networkProfile } from "../near/network.js";
 import { relayDelivery } from "../near/relayer.js";
 import { getProvider } from "../near/rpc.js";
+import { callerFromAccount, readerFromProvider } from "../near/chain.js";
 import type { ApiDeps } from "./server.js";
 
 /**
@@ -16,7 +17,7 @@ import type { ApiDeps } from "./server.js";
  */
 export function depsFromConfig(): ApiDeps {
   const profile = networkProfile();
-  const deps: ApiDeps = {};
+  const deps: ApiDeps = { chain: readerFromProvider(getProvider()) };
 
   if (profile.intents) deps.oneClick = new OneClickClient({ apiKey: config.intentsApiKey });
 
@@ -25,6 +26,7 @@ export function depsFromConfig(): ApiDeps {
     const provider = getProvider();
     const account = new Account(accountId, provider, privateKey as KeyPairString);
     deps.writer = new FactoryClauseWriter(account, profile);
+    deps.caller = callerFromAccount(account);
     deps.relay = (signedDelegate) => relayDelivery(account, signedDelegate, { factoryAccountId: profile.factoryAccountId, provider });
   }
   return deps;
