@@ -2,35 +2,31 @@ import OpenAI from "openai";
 import { MandateLimitsSchema, type MandateLimits } from "./schema.js";
 import { config } from "../config.js";
 
-const SYSTEM_PROMPT = `You compile a human's plain-English trading covenant into a strict JSON policy object.
-Output ONLY a JSON object (no markdown fences, no commentary) with exactly these fields:
+const SYSTEM_PROMPT = `You compile a treasury's plain-English payment rule into a strict JSON policy object.
+The policy governs clauses: payments held in a NEAR sub-account until a job is delivered, then released to the payee or returned to the buyer.
+Output ONLY a JSON object (no markdown fences, no commentary) with exactly these fields. Amounts are in stablecoin units (USD):
 {
-  "perTradeMaxUsd": number,      // absolute hard cap on a single order's USD notional; nothing above this ever executes, confirmed or not
-  "dailySpendCapUsd": number,    // max total USD notional across all orders in a day
-  "maxLeverage": number,         // 1 if spot-only / no leverage mentioned
-  "dailyDrawdownHaltPct": number,// halt all trading if NAV drops this many percent in a day
-  "confirmAboveUsd": number,     // orders above this USD size, but still under perTradeMaxUsd, require explicit human confirmation before executing
-  "allowedSymbols": string[] | null,   // e.g. ["BTCUSDT","ETHUSDT"], or null if unrestricted
-  "blockedSymbols": string[] | null,
-  "allowedSides": ("BUY"|"SELL")[] | null,
-  "maxSlippageBps": number | null,
-  "perSymbolDailyCapUsd": number | null,  // max total USD per symbol per day, across everything
-  "maxTradesPerHour": number | null,      // most trades one agent may make in any rolling hour (whole number)
-  "cooldownSeconds": number | null,       // minimum seconds between two trades by the same agent in the same symbol
-  "maxOpenOrders": number | null,         // most limit orders allowed to rest on the book at once (whole number)
-  "maxLimitDeviationPct": number | null   // a limit price further than this percent from the market is refused
+  "maxPerClause": number,          // hard cap on one clause; nothing above this is ever written, confirmed or not
+  "dailySpendCap": number,         // max total value of clauses written in one UTC day
+  "perPayeeDailyCap": number,      // max total value to any single payee in one UTC day
+  "newPayeeCeiling": number,       // most a payee who has never been paid through a released clause may be offered
+  "confirmAbove": number,          // clauses above this, but under maxPerClause, need a second person to approve
+  "allowedAssets": string[],       // asset symbols, e.g. ["USDC","USDT"]; default ["USDC"] if none are named
+  "allowedPayees": string[] | null,  // NEAR account ids, or null if unrestricted
+  "blockedPayees": string[] | null,
+  "maxClausesPerHour": number | null,   // most clauses one agent may write in any rolling hour (whole number)
+  "maxDeadlineMinutes": number | null   // longest a clause may stay open before it expires and returns
 }
-IMPORTANT: confirmAboveUsd must always be strictly less than perTradeMaxUsd. If it were not, no order could ever
-be large enough to need confirmation without already being blocked by the hard cap, making confirmAboveUsd meaningless.
-Be conservative: if the covenant doesn't mention a limit, pick a sensible strict default rather than an unlimited one
-(e.g. if only one of perTradeMaxUsd/confirmAboveUsd is stated, set the other to roughly a third of it, respecting the
-constraint above; dailyDrawdownHaltPct defaults to 5 if unstated).
-Omit optional array fields as null rather than guessing a symbol list that wasn't mentioned.
-Set perSymbolDailyCapUsd, maxTradesPerHour, cooldownSeconds, maxOpenOrders, and maxLimitDeviationPct to null unless the covenant asks for that kind of limit. Do not invent them.`;
+IMPORTANT: confirmAbove must always be strictly less than maxPerClause, otherwise no clause could ever need confirmation
+without already being blocked by the hard cap. newPayeeCeiling must not exceed maxPerClause.
+Be conservative: if the rule doesn't mention a limit, pick a sensible strict default rather than an unlimited one
+(e.g. if only maxPerClause is stated, set confirmAbove to roughly a third of it, newPayeeCeiling to roughly half of it,
+perPayeeDailyCap to twice it and dailySpendCap to ten times it).
+Set allowedPayees, blockedPayees, maxClausesPerHour and maxDeadlineMinutes to null unless the rule asks for that kind of limit. Do not invent them.`;
 
 /**
  * Pure parse/normalize/validate step, factored out of compileMandateFromText
- * so it's unit-testable without a live OpenAI call. Strips markdown code
+ * so it's unit-testable without a live model call. Strips markdown code
  * fences first, since models occasionally wrap JSON in them despite the
  * system prompt saying not to.
  */
@@ -61,15 +57,21 @@ export function parseCompilerOutput(rawText: string): MandateLimits {
     );
   }
 
-  // Belt-and-braces: the prompt asks for confirmAboveUsd < perTradeMaxUsd, but
+  // Belt-and-braces: the prompt asks for confirmAbove < maxPerClause, but
   // a model can ignore instructions. Enforce it in code rather than trusting
   // the prompt alone, since a violation here silently makes the ESCALATE
   // verdict unreachable (see policy/rules/confirmAboveX.ts).
-  if (result.data.confirmAboveUsd >= result.data.perTradeMaxUsd) {
+  if (result.data.confirmAbove >= result.data.maxPerClause) {
     throw new Error(
-      `Mandate compiler output is inconsistent: confirmAboveUsd ($${result.data.confirmAboveUsd}) must be less than ` +
-        `perTradeMaxUsd ($${result.data.perTradeMaxUsd}), otherwise no order could ever need confirmation without ` +
+      `Mandate compiler output is inconsistent: confirmAbove (${result.data.confirmAbove}) must be less than ` +
+        `maxPerClause (${result.data.maxPerClause}), otherwise no clause could ever need confirmation without ` +
         `already being blocked by the hard cap. Refusing to activate this policy.`
+    );
+  }
+  if (result.data.newPayeeCeiling > result.data.maxPerClause) {
+    throw new Error(
+      `Mandate compiler output is inconsistent: newPayeeCeiling (${result.data.newPayeeCeiling}) is above ` +
+        `maxPerClause (${result.data.maxPerClause}). Refusing to activate this policy.`
     );
   }
 
@@ -77,22 +79,23 @@ export function parseCompilerOutput(rawText: string): MandateLimits {
 }
 
 /**
- * Compiles free-text covenant into draft MandateLimits via the OpenAI API.
+ * Compiles a free-text rule into draft MandateLimits via NEAR AI Cloud
+ * (an OpenAI-compatible endpoint).
  * Always re-validated through MandateLimitsSchema before it's ever shown to
  * the operator, so a malformed or out-of-range model response fails loudly
  * here rather than silently becoming a live policy.
  */
 export async function compileMandateFromText(covenantText: string): Promise<MandateLimits> {
-  if (!config.openaiApiKey) {
+  if (!config.nearAi.apiKey || !config.nearAi.model) {
     throw new Error(
-      "OPENAI_API_KEY is not set. The NL mandate compiler is unavailable. " +
+      "NEARAI_API_KEY and NEARAI_MODEL must be set to use the plain-English mandate compiler. " +
         "Edit a mandate JSON file directly under data/mandates/ instead (see src/mandate/examples/demo-mandate.json for the shape)."
     );
   }
 
-  const client = new OpenAI({ apiKey: config.openaiApiKey });
+  const client = new OpenAI({ apiKey: config.nearAi.apiKey, baseURL: config.nearAi.baseUrl });
   const response = await client.chat.completions.create({
-    model: config.openaiModel,
+    model: config.nearAi.model,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT },

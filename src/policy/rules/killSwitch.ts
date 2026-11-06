@@ -2,9 +2,9 @@ import type { RuleResult } from "../types.js";
 import type { KillSwitchState } from "../../approval/state.js";
 
 /**
- * Operator-level circuit breaker. While engaged, every proposal is vetoed
- * regardless of size or mandate, including one that a human already
- * approved but that hasn't executed yet.
+ * Operator-level circuit breaker. While engaged, no new clause is written,
+ * including one a human already approved. Clauses already on chain are not
+ * touched: their funds stay under their own terms.
  */
 export function checkKillSwitch(state: KillSwitchState | undefined): RuleResult {
   if (state?.engaged) {
@@ -13,7 +13,7 @@ export function checkKillSwitch(state: KillSwitchState | undefined): RuleResult 
     return {
       rule: "killSwitch",
       outcome: "violated",
-      detail: `Trading is halted${who} since ${state.since}${why}. Nothing executes until it is released.`,
+      detail: `New clauses are halted${who} since ${state.since}${why}. Nothing is written until it is released.`,
     };
   }
   return { rule: "killSwitch", outcome: "ok", detail: "Kill switch is not engaged" };

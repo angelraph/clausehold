@@ -7,7 +7,7 @@ export async function auditTailCommand(n: number): Promise<void> {
     return;
   }
   for (const e of entries) {
-    console.log(`#${e.seq} [${e.timestamp}] ${e.type} (${e.venue})`);
+    console.log(`#${e.seq} [${e.timestamp}] ${e.type} (${e.network})`);
     console.log(`    ${JSON.stringify(e.payload)}`);
   }
 }

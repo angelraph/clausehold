@@ -16,10 +16,10 @@ export async function initCommand(): Promise<void> {
   await saveMandate(mandate);
   await auditLog.append("MANDATE_CREATED", "n/a", { mandateId: mandate.id, source: "demo-mandate.json", limits: mandate.limits });
 
-  console.log(`Mandate ${mandate.id} activated.`);
-  console.log(`  Covenant: "${mandate.naturalLanguageSource}"`);
-  console.log(`  Per-trade max: $${mandate.limits.perTradeMaxUsd}`);
-  console.log(`  Daily spend cap: $${mandate.limits.dailySpendCapUsd}`);
-  console.log(`  Confirm above: $${mandate.limits.confirmAboveUsd}`);
-  console.log(`  Allowed symbols: ${mandate.limits.allowedSymbols?.join(", ") ?? "any"}`);
+  const l = mandate.limits;
+  console.log(`Mandate ${mandate.id} activated for ${mandate.factoryAccountId}.`);
+  console.log(`  Rule: "${mandate.naturalLanguageSource}"`);
+  console.log(`  Max per clause: ${l.maxPerClause}   confirm above: ${l.confirmAbove}`);
+  console.log(`  Per payee per day: ${l.perPayeeDailyCap}   all payees per day: ${l.dailySpendCap}`);
+  console.log(`  New payee ceiling: ${l.newPayeeCeiling}   assets: ${l.allowedAssets.join(", ")}`);
 }

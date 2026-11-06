@@ -9,7 +9,7 @@ let logPath: string;
 let log: AuditLog;
 
 beforeEach(() => {
-  dir = mkdtempSync(path.join(tmpdir(), "charter-audit-test-"));
+  dir = mkdtempSync(path.join(tmpdir(), "clausehold-audit-test-"));
   logPath = path.join(dir, "audit.log.jsonl");
   log = new AuditLog(logPath);
 });
@@ -26,7 +26,7 @@ describe("AuditLog", () => {
 
   it("hash-links each entry to the previous one", async () => {
     await log.append("MANDATE_CREATED", "n/a", { note: "first" });
-    await log.append("PROPOSAL_RECEIVED", "testnet", { note: "second" });
+    await log.append("CLAUSE_PROPOSED", "testnet", { note: "second" });
     const entries = await log.all();
     expect(entries).toHaveLength(2);
     expect(entries[0]!.prevHash).toBe("GENESIS");
@@ -35,16 +35,16 @@ describe("AuditLog", () => {
 
   it("verifies an untampered chain of several entries", async () => {
     for (let i = 0; i < 5; i++) {
-      await log.append("PROPOSAL_RECEIVED", "testnet", { i });
+      await log.append("CLAUSE_PROPOSED", "testnet", { i });
     }
     const result = await log.verify();
     expect(result.ok).toBe(true);
   });
 
   it("detects tampering with a single field in an earlier entry", async () => {
-    await log.append("PROPOSAL_RECEIVED", "testnet", { notionalUsd: 15 });
+    await log.append("CLAUSE_PROPOSED", "testnet", { notionalUsd: 15 });
     await log.append("VERDICT_ISSUED", "testnet", { decision: "PASS" });
-    await log.append("EXECUTION_FILLED", "testnet", { orderId: "123" });
+    await log.append("CLAUSE_RELEASED", "testnet", { orderId: "123" });
 
     const raw = readFileSync(logPath, "utf-8");
     const tampered = raw.replace('"notionalUsd":15', '"notionalUsd":15000');
@@ -59,9 +59,9 @@ describe("AuditLog", () => {
   });
 
   it("detects a broken prevHash link even if individual hashes are internally consistent", async () => {
-    await log.append("PROPOSAL_RECEIVED", "testnet", { a: 1 });
-    await log.append("PROPOSAL_RECEIVED", "testnet", { a: 2 });
-    await log.append("PROPOSAL_RECEIVED", "testnet", { a: 3 });
+    await log.append("CLAUSE_PROPOSED", "testnet", { a: 1 });
+    await log.append("CLAUSE_PROPOSED", "testnet", { a: 2 });
+    await log.append("CLAUSE_PROPOSED", "testnet", { a: 3 });
 
     const lines = readFileSync(logPath, "utf-8").trim().split("\n");
     // Swap the first two lines: each entry's own hash is still internally
@@ -74,7 +74,7 @@ describe("AuditLog", () => {
   });
 
   it("recovers to a valid chain once the file is restored", async () => {
-    await log.append("PROPOSAL_RECEIVED", "testnet", { a: 1 });
+    await log.append("CLAUSE_PROPOSED", "testnet", { a: 1 });
     const original = readFileSync(logPath, "utf-8");
 
     writeFileSync(logPath, original.replace('"a":1', '"a":2'), "utf-8");
