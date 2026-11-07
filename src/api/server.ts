@@ -32,6 +32,7 @@ import {
   publicInviteView,
   writeIfReady,
 } from "../invites/service.js";
+import { recordWalletClause, walletCreateCall } from "../invites/wallet.js";
 import type { ClauseWriter } from "../near/clauseWriter.js";
 import { deriveDesk, type DeskClause } from "../desk/view.js";
 import { isTerminal, syncClauseFromChain } from "../desk/chainSync.js";
@@ -74,6 +75,7 @@ const ClauseBodySchema = z.object({
 });
 
 const DecisionBodySchema = z.object({ note: z.string().optional() });
+const WrittenBodySchema = z.object({ clauseAccountId: z.string().min(5).max(128), txHash: z.string().min(20).max(100) });
 const KeyBodySchema = z.object({ publicKey: z.string().min(10), keySource: z.enum(["passkey-prf", "browser-random"]) });
 const QuoteBodySchema = z.object({
   /** 1Click assetId of what the payer holds, e.g. USDC on Base. */
@@ -90,6 +92,15 @@ const RelayBodySchema = z.object({ signedDelegate: z.string().min(16) });
  * the capability; the relay validates every delegate itself before paying.
  */
 function isPublicRoute(method: string, path: string): boolean {
+  if (config.clauseWriter === "wallet") {
+    // The buyer's wallet signs and pays for everything that costs money, so
+    // proposing a clause and reading the desk need no key here. The key still
+    // guards every route where the desk itself would sign.
+    if (method === "POST" && path === "/invites") return true;
+    if (method === "GET" && (path === "/desk/clauses" || path === "/mandate")) return true;
+    if (method === "GET" && /^\/invites\/[^/]+\/create$/.test(path)) return true;
+    if (method === "POST" && /^\/invites\/[^/]+\/written$/.test(path)) return true;
+  }
   if (method === "GET" && /^\/invites\/[^/]+$/.test(path)) return true;
   if (method === "POST" && /^\/invites\/[^/]+\/key$/.test(path)) return true;
   if (method === "POST" && /^\/clauses\/[^/]+\/fund\/quote$/.test(path)) return true;
@@ -458,7 +469,7 @@ export function createApp(deps: ApiDeps = {}): express.Express {
     }
     try {
       const rec = await bindKey(req.params.id as string, body.data.publicKey, body.data.keySource, deps.writer);
-      const pendingReason = rec.status === "written" ? null : !rec.cleared ? "waiting for a second person to approve the clause" : !deps.writer ? "no chain writer is configured on this server" : null;
+      const pendingReason = rec.status === "written" ? null : !rec.cleared ? "waiting for a second person to approve the clause" : config.clauseWriter === "wallet" ? "waiting for the buyer to write the clause from their wallet" : !deps.writer ? "no chain writer is configured on this server" : null;
       res.json({ invite: publicInviteView(rec), pendingReason });
     } catch (err) {
       if (err instanceof InviteNotFoundError) {
@@ -468,6 +479,44 @@ export function createApp(deps: ApiDeps = {}): express.Express {
       } else {
         res.status(502).json({ error: `Could not write the clause on chain: ${err instanceof Error ? err.message : String(err)}` });
       }
+    }
+  });
+
+  // ---- The buyer's wallet writes the clause ----
+
+  /** The exact create_clause call for the buyer's wallet to sign. */
+  app.get("/invites/:id/create", async (req: Request, res: Response) => {
+    if (!deps.chain) {
+      res.status(503).json({ error: "This desk cannot read the chain" });
+      return;
+    }
+    try {
+      res.json(await walletCreateCall(req.params.id as string, deps.chain));
+    } catch (err) {
+      if (err instanceof InviteNotFoundError) res.status(404).json({ error: "Unknown invite" });
+      else if (err instanceof InviteStateError) res.status(409).json({ error: err.message });
+      else res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /** The wallet says it made the clause. The desk reads it from the chain and links it only if every term matches. */
+  app.post("/invites/:id/written", async (req: Request, res: Response) => {
+    const body = WrittenBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      res.status(400).json({ error: "Body must be { clauseAccountId, txHash }" });
+      return;
+    }
+    if (!deps.chain) {
+      res.status(503).json({ error: "This desk cannot read the chain" });
+      return;
+    }
+    try {
+      const rec = await recordWalletClause(req.params.id as string, body.data.clauseAccountId, body.data.txHash, deps.chain);
+      res.json({ invite: publicInviteView(rec) });
+    } catch (err) {
+      if (err instanceof InviteNotFoundError) res.status(404).json({ error: "Unknown invite" });
+      else if (err instanceof InviteStateError) res.status(409).json({ error: err.message });
+      else res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 

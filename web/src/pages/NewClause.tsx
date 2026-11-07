@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { WalletButton } from "../components/WalletButton";
+import { useNetwork } from "../lib/network";
+import { useWallet } from "../lib/wallet";
 import { ApiDown, PageHead } from "../components/Page";
 import { api, ApiError, loadSettings, type OpenInviteResult } from "../lib/api";
 
 export default function NewClause() {
   const [params] = useSearchParams();
   const settings = loadSettings();
+  const { network } = useNetwork();
+  const w = useWallet();
   const [form, setForm] = useState({
     payee: params.get("payee") ?? "",
     amount: "2",
@@ -21,6 +26,7 @@ export default function NewClause() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!w.accountId) return;
     setBusy(true);
     setError(null);
     setResult(null);
@@ -29,7 +35,7 @@ export default function NewClause() {
         await api.openInvite({
           agentId: settings.agentId,
           mandateId: settings.mandateId,
-          buyer: settings.buyer,
+          buyer: w.accountId,
           payee: form.payee.trim(),
           amount: Number(form.amount),
           asset: form.asset,
@@ -80,10 +86,22 @@ export default function NewClause() {
               <input id="challenge" className="input mono" inputMode="numeric" value={form.challengeSecs} onChange={set("challengeSecs")} />
             </div>
           </div>
-          <p className="faint" style={{ fontSize: 13, margin: 0 }}>
-            Funded by <span className="mono">{settings.buyer}</span>. If nothing is delivered in time, the money returns there.
-          </p>
-          <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Checking the mandate" : "Check and open an invite"}</button>
+          {w.accountId ? (
+            <>
+              <p className="faint" style={{ fontSize: 13, margin: 0 }}>
+                Paid from <span className="mono">{w.accountId}</span>, your connected wallet. If nothing is delivered in time, the money returns there.
+              </p>
+              <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Checking the mandate" : "Check and open an invite"}</button>
+            </>
+          ) : (
+            <div style={{ display: "grid", gap: 10, justifyItems: "start" }}>
+              <p className="faint" style={{ fontSize: 13, margin: 0 }}>
+                Connect the wallet that will pay. Clausehold never holds your keys or your money.
+                {network.id === "testnet" && <> New to testnet? <Link className="link-arrow" to="/faucet">Get free test tokens</Link></>}
+              </p>
+              <WalletButton />
+            </div>
+          )}
         </form>
 
         <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
@@ -93,7 +111,7 @@ export default function NewClause() {
               <ol className="timeline" style={{ marginTop: 16 }}>
                 <li><div>The mandate checks the clause</div><div className="faint" style={{ fontSize: 13 }}>Before anyone signs. A refusal names the rule.</div></li>
                 <li><div>You send the payee a link</div><div className="faint" style={{ fontSize: 13 }}>Their browser makes the only key the clause will accept.</div></li>
-                <li><div>The clause is written and funded</div><div className="faint" style={{ fontSize: 13 }}>From any chain, through NEAR Intents.</div></li>
+                <li><div>You write and fund it from your wallet</div><div className="faint" style={{ fontSize: 13 }}>{network.intents ? "With USDC on NEAR, or from any chain through NEAR Intents." : "With free test mUSD from the faucet."}</div></li>
                 <li><div>Delivery releases the money</div><div className="faint" style={{ fontSize: 13 }}>Or the deadline returns it to you.</div></li>
               </ol>
             </div>
@@ -115,7 +133,7 @@ export default function NewClause() {
               </div>
               {inviteUrl && (
                 <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
-                  <div className="notice notice-violet">Send this link to the payee. It is the only way to bind the key that can deliver.</div>
+                  <div className="notice notice-violet">Send this link to the payee. When they accept, open the clause to write and fund it from your wallet.</div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <input className="input mono" readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} />
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigator.clipboard?.writeText(inviteUrl)}>Copy</button>

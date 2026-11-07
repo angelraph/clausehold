@@ -19,6 +19,13 @@ const ConfigSchema = z.object({
     accountId: z.string().optional(),
     privateKey: z.string().optional(),
   }),
+  /**
+   * Who signs create_clause. "server": the service account writes cleared
+   * clauses and pays the deposit (agents and local runs). "wallet": the
+   * buyer's own wallet signs and pays, and the desk only checks the result
+   * on chain. Hosted desks use "wallet", so the desk never spends for strangers.
+   */
+  clauseWriter: z.enum(["server", "wallet"]),
   /** NEAR Intents 1Click partner key. Optional: without it 1Click adds a 0.25% fee. */
   intentsApiKey: z.string().optional(),
   /** Browser origins allowed to call the API, e.g. the deployed web app. */
@@ -58,6 +65,7 @@ function loadConfig(): Config {
       accountId: process.env.CLAUSEHOLD_RELAYER_ACCOUNT || undefined,
       privateKey: process.env.CLAUSEHOLD_RELAYER_PRIVATE_KEY || undefined,
     },
+    clauseWriter: process.env.CLAUSEHOLD_CLAUSE_WRITER === "wallet" ? "wallet" : "server",
     intentsApiKey: process.env.NEAR_INTENTS_API_KEY || undefined,
     webOrigins: (process.env.CLAUSEHOLD_WEB_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173").split(",").map((o) => o.trim()).filter(Boolean),
     apiPort: process.env.CLAUSEHOLD_API_PORT ?? 4477,

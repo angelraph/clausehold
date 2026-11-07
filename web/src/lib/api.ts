@@ -151,7 +151,18 @@ export interface DeskClause {
   lastEvent: string;
 }
 
+export interface CreateCall {
+  receiverId: string;
+  methodName: "create_clause";
+  args: { worker_pk: string; [k: string]: unknown };
+  deposit: string;
+  gas: string;
+}
+
 export const api = {
+  createCall: (inviteId: string) => call<CreateCall>(`/invites/${encodeURIComponent(inviteId)}/create`),
+  written: (inviteId: string, clauseAccountId: string, txHash: string) =>
+    call<{ invite: InviteView }>(`/invites/${encodeURIComponent(inviteId)}/written`, { method: "POST", body: JSON.stringify({ clauseAccountId, txHash }) }),
   openInvite: (body: Record<string, unknown>) => call<OpenInviteResult>("/invites", { method: "POST", body: JSON.stringify(body), auth: true }),
   invite: (id: string) => call<InviteView>(`/invites/${encodeURIComponent(id)}`),
   bindKey: (id: string, publicKey: string, keySource: string) =>

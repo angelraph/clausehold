@@ -2,9 +2,36 @@ import { getTransactionLastResult } from "near-api-js";
 import type { Account } from "near-api-js";
 import type { ClauseWriter, CreateClauseParams, CreatedClause } from "./clauseWriter.js";
 import { assetFor, toBaseUnits, type NetworkProfile } from "./network.js";
+import type { ClauseProposal } from "../policy/types.js";
 
 /** 300 Tgas: create_clause deploys the clause code and adds its key in one go. */
-const CREATE_GAS = 300_000_000_000_000n;
+export const CREATE_GAS = 300_000_000_000_000n;
+
+export interface CreateClauseArgs {
+  buyer: string;
+  payee: string;
+  worker_pk: string;
+  asset: string;
+  amount: string;
+  deadline: number;
+  terms_hash: string;
+  challenge_secs: number;
+}
+
+/** The exact create_clause arguments for a proposal, whoever signs them: the service account or the buyer's own wallet. */
+export function createClauseArgs(proposal: ClauseProposal, workerPublicKey: string, termsHash: string, profile: NetworkProfile): CreateClauseArgs {
+  const asset = assetFor(profile, proposal.asset);
+  return {
+    buyer: proposal.buyer,
+    payee: proposal.payee,
+    worker_pk: workerPublicKey,
+    asset: asset.contractId,
+    amount: toBaseUnits(proposal.amount, asset.decimals),
+    deadline: Math.floor(new Date(proposal.deadline).getTime() / 1000),
+    terms_hash: termsHash,
+    challenge_secs: proposal.challengeSecs,
+  };
+}
 
 export class ClauseCreateError extends Error {
   constructor(message: string) {
@@ -28,21 +55,11 @@ export class FactoryClauseWriter implements ClauseWriter {
   ) {}
 
   async createClause({ proposal, workerPublicKey, termsHash }: CreateClauseParams): Promise<CreatedClause> {
-    const asset = assetFor(this.profile, proposal.asset);
     const factory = this.profile.factoryAccountId;
     const deposit = await this.caller.provider.callFunction<string>({ contractId: factory, method: "create_deposit", args: {} });
     if (!deposit) throw new ClauseCreateError("The factory did not report its create_deposit");
 
-    const args = {
-      buyer: proposal.buyer,
-      payee: proposal.payee,
-      worker_pk: workerPublicKey,
-      asset: asset.contractId,
-      amount: toBaseUnits(proposal.amount, asset.decimals),
-      deadline: Math.floor(new Date(proposal.deadline).getTime() / 1000),
-      terms_hash: termsHash,
-      challenge_secs: proposal.challengeSecs,
-    };
+    const args = createClauseArgs(proposal, workerPublicKey, termsHash, this.profile);
 
     const res = await this.caller.callFunctionRaw({ contractId: factory, methodName: "create_clause", args, deposit: BigInt(deposit), gas: CREATE_GAS });
     const failure = (res as { status?: { Failure?: unknown } }).status?.Failure;
