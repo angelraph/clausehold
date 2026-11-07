@@ -59,12 +59,20 @@ async function call<T>(path: string, init: RequestInit & { auth?: boolean } = {}
   const headers: Record<string, string> = { Accept: "application/json" };
   if (init.body) headers["Content-Type"] = "application/json";
   if (init.auth && s.apiKey) headers["X-Clausehold-Api-Key"] = s.apiKey;
-  let res: Response;
-  try {
-    res = await fetch(`${s.apiBase.replace(/\/$/, "")}${path}`, { ...init, headers });
-  } catch {
-    throw new ApiError(0, `Could not reach the desk API at ${s.apiBase}`);
+  const url = `${s.apiBase.replace(/\/$/, "")}${path}`;
+  const method = (init.method ?? "GET").toUpperCase();
+  let res: Response | null = null;
+  // A reading request that fails or hits a cold server gets one quiet retry.
+  for (let attempt = 0; attempt < (method === "GET" ? 2 : 1); attempt++) {
+    try {
+      res = await fetch(url, { ...init, headers });
+      if (res.status < 500 || method !== "GET") break;
+    } catch {
+      res = null;
+    }
+    await new Promise((r) => setTimeout(r, 600));
   }
+  if (!res) throw new ApiError(0, `Could not reach the desk API at ${s.apiBase}`);
   const body = (await res.json().catch(() => undefined)) as { error?: string } | undefined;
   if (!res.ok) throw new ApiError(res.status, body?.error ?? res.statusText, body);
   return body as T;
