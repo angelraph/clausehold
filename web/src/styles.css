@@ -332,12 +332,16 @@ section { position: relative; }
 .nav-sheet .wallet a, .nav-sheet .wallet button { border-bottom: 0; }
 
 /* Steps on the faucet and clause pages */
-.steps { display: grid; gap: 14px; counter-reset: step; }
-.step { display: grid; grid-template-columns: 32px 1fr; gap: 14px; align-items: start; }
-.step-num { width: 32px; height: 32px; border-radius: 999px; display: grid; place-items: center; font-family: var(--font-mono); font-size: 13px; border: 1px solid var(--line-strong); color: var(--muted); }
-.step.done .step-num { background: var(--violet-soft); border-color: var(--violet); color: var(--violet-2); }
-.step h3 { margin: 4px 0 6px; font-size: 16px; }
-.step p { margin: 0 0 10px; }
+.fsteps { display: grid; gap: 0; }
+.fstep { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 16px; align-items: start; padding: 22px 0; border-top: 1px solid var(--line); }
+.fstep:first-child { border-top: 0; padding-top: 4px; }
+.fstep:last-child { padding-bottom: 4px; }
+.fstep-num { width: 36px; height: 36px; border-radius: 999px; display: grid; place-items: center; font-family: var(--font-mono); font-size: 13px; border: 1px solid var(--line-strong); color: var(--muted); }
+.fstep.done .fstep-num { background: var(--violet-soft); border-color: var(--violet); color: var(--violet-2); }
+.fstep h3 { margin: 6px 0 8px; font-size: 17px; }
+.fstep p { margin: 0 0 14px; line-height: 1.6; }
+.fstep .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 640px) { .fstep { grid-template-columns: 1fr; gap: 10px; } }
 .wallet-btn .dot { width: 7px; height: 7px; border-radius: 50%; }
 .wallet-btn .dot.testnet { background: var(--amber); }
 .wallet-btn .dot.mainnet { background: var(--green); }

@@ -83,9 +83,9 @@ export default function Faucet() {
         Three steps and you can write, fund and settle a clause with nothing real at stake. Test tokens have no value and exist only on testnet.
       </p>
 
-      <div className="card card-pad steps" style={{ marginTop: 28 }}>
-        <div className={`step ${hasAccount ? "done" : ""}`}>
-          <div className="step-num">{hasAccount ? "✓" : 1}</div>
+      <div className="card card-pad fsteps" style={{ marginTop: 28 }}>
+        <div className={`fstep ${hasAccount ? "done" : ""}`}>
+          <div className="fstep-num">{hasAccount ? "✓" : 1}</div>
           <div>
             <h3>Connect a testnet wallet</h3>
             {hasAccount ? (
@@ -103,8 +103,8 @@ export default function Faucet() {
           </div>
         </div>
 
-        <div className={`step ${hasNear ? "done" : ""}`}>
-          <div className="step-num">{hasNear ? "✓" : 2}</div>
+        <div className={`fstep ${hasNear ? "done" : ""}`}>
+          <div className="fstep-num">{hasNear ? "✓" : 2}</div>
           <div>
             <h3>Get test NEAR</h3>
             <p className="muted">
@@ -112,7 +112,7 @@ export default function Faucet() {
               The official NEAR faucet sends it to any testnet account.
               {near !== null && <> You hold <span className="mono" style={{ color: "var(--text)" }}>{formatNear(near)} NEAR</span>.</>}
             </p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div className="btn-row">
               <a className={`btn btn-sm ${hasNear ? "btn-ghost" : "btn-primary"}`} href={NEAR_FAUCET} target="_blank" rel="noreferrer">Open the NEAR faucet</a>
               {hasAccount && <button className="btn btn-ghost btn-sm" onClick={refresh}>Check my balance</button>}
               <a className="btn btn-ghost btn-sm" href={NEAR_FAUCET_DOCS} target="_blank" rel="noreferrer">How the faucet works</a>
@@ -125,8 +125,8 @@ export default function Faucet() {
           </div>
         </div>
 
-        <div className={`step ${hasUsd ? "done" : ""}`}>
-          <div className="step-num">{hasUsd ? "✓" : 3}</div>
+        <div className={`fstep ${hasUsd ? "done" : ""}`}>
+          <div className="fstep-num">{hasUsd ? "✓" : 3}</div>
           <div>
             <h3>Get 100 test dollars</h3>
             <p className="muted">
@@ -136,13 +136,14 @@ export default function Faucet() {
             <button className={`btn btn-sm ${hasUsd ? "btn-ghost" : "btn-primary"}`} onClick={mint} disabled={!hasAccount || minting || near === 0}>
               {minting ? "Waiting for your wallet" : "Get 100 mUSD"}
             </button>
+            {!hasAccount && <p className="faint" style={{ fontSize: 13, marginTop: 10 }}>Connect a wallet in step 1 first.</p>}
             {hasAccount && near === 0 && <p className="faint" style={{ fontSize: 13, marginTop: 10 }}>Get test NEAR first: the request needs a tiny network fee.</p>}
             {msg && <div className={`notice ${msg.ok ? "notice-green" : "notice-red"}`} style={{ marginTop: 12 }}>{msg.text}</div>}
           </div>
         </div>
 
-        <div className="step">
-          <div className="step-num">4</div>
+        <div className="fstep">
+          <div className="fstep-num">4</div>
           <div>
             <h3>Write your first clause</h3>
             <p className="muted">Pay a friend's testnet account, or your own second one, for a small job. The money waits in the clause until they deliver.</p>

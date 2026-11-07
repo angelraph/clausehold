@@ -75,6 +75,8 @@ const ClauseBodySchema = z.object({
 });
 
 const DecisionBodySchema = z.object({ note: z.string().optional() });
+/** How long the desk list waits for the chain before answering with what it already knows. */
+const DESK_SYNC_BUDGET_MS = 3500;
 const WrittenBodySchema = z.object({ clauseAccountId: z.string().min(5).max(128), txHash: z.string().min(20).max(100) });
 const KeyBodySchema = z.object({ publicKey: z.string().min(10), keySource: z.enum(["passkey-prf", "browser-random"]) });
 const QuoteBodySchema = z.object({
@@ -387,7 +389,10 @@ export function createApp(deps: ApiDeps = {}): express.Express {
 
   app.get("/desk/clauses", async (_req: Request, res: Response) => {
     const agent = res.locals.agent as AgentRecord | undefined;
-    for (const row of deriveDesk(await auditLog.all())) await syncRow(row);
+    // Bring live clauses up to date from the chain, all at once and for at most
+    // a few seconds. A slow RPC node only means a row shows its last known state.
+    const live = deriveDesk(await auditLog.all()).filter((r) => r.clauseAccountId && !isTerminal(r.lastEvent));
+    if (live.length) await Promise.race([Promise.allSettled(live.map(syncRow)), new Promise((r) => setTimeout(r, DESK_SYNC_BUDGET_MS))]);
     const rows = deriveDesk(await auditLog.all());
     // A registered agent sees only its own clauses.
     res.json(agent ? rows.filter((r) => r.proposal.agentId === agent.agentId) : rows);
