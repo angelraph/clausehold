@@ -25,7 +25,8 @@ export function depsFromConfig(): ApiDeps {
   if (accountId && privateKey) {
     const provider = getProvider();
     const account = new Account(accountId, provider, privateKey as KeyPairString);
-    deps.writer = new FactoryClauseWriter(account, profile);
+    // In wallet mode the buyer writes the clause; the service account only relays deliveries.
+    if (config.clauseWriter === "server") deps.writer = new FactoryClauseWriter(account, profile);
     deps.caller = callerFromAccount(account);
     deps.relay = (signedDelegate) => relayDelivery(account, signedDelegate, { factoryAccountId: profile.factoryAccountId, provider });
   }

@@ -1,19 +1,25 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { Logo } from "./Logo";
-import { NetworkSwitch } from "../lib/network";
+import { NetworkSwitch, useNetwork } from "../lib/network";
+import { WalletButton } from "./WalletButton";
 
 const LINKS = [
   { to: "/how-it-works", label: "How it works" },
   { to: "/developers", label: "For agents" },
   { to: "/security", label: "Security" },
   { to: "/mandate", label: "Mandate" },
+  { to: "/desk", label: "Desk" },
 ];
 
 export function Nav() {
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
-  useEffect(() => setOpen(false), [pathname]);
+  const { network } = useNetwork();
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+  const links = network.id === "testnet" ? [...LINKS, { to: "/faucet", label: "Faucet" }] : LINKS;
 
   return (
     <header className="nav">
@@ -22,7 +28,7 @@ export function Nav() {
           <Logo />
         </Link>
         <nav className="nav-links" aria-label="Main">
-          {LINKS.map((l) => (
+          {links.map((l) => (
             <NavLink key={l.to} to={l.to}>
               {l.label}
             </NavLink>
@@ -30,9 +36,7 @@ export function Nav() {
         </nav>
         <div className="nav-cta">
           <NetworkSwitch />
-          <Link className="btn btn-ghost btn-sm" to="/desk">
-            Open the desk
-          </Link>
+          <WalletButton />
           <Link className="btn btn-primary btn-sm" to="/desk/new">
             Write a clause
           </Link>
@@ -45,12 +49,14 @@ export function Nav() {
       </div>
       <div className={`nav-sheet wrap ${open ? "open" : ""}`}>
         <NetworkSwitch />
-        {LINKS.map((l) => (
+        {links.map((l) => (
           <Link key={l.to} to={l.to}>
             {l.label}
           </Link>
         ))}
-        <Link to="/desk">Open the desk</Link>
+        <div style={{ marginTop: 12 }}>
+          <WalletButton block />
+        </div>
         <Link className="btn btn-primary" to="/desk/new">
           Write a clause
         </Link>
@@ -74,6 +80,7 @@ export function Footer() {
               <li><Link to="/how-it-works">How it works</Link></li>
               <li><Link to="/desk">The desk</Link></li>
               <li><Link to="/mandate">Mandate</Link></li>
+              <li><Link to="/faucet">Testnet faucet</Link></li>
             </ul>
           </div>
           <div>

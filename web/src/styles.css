@@ -114,7 +114,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .nav-cta { margin-left: auto; display: flex; gap: 10px; align-items: center; }
 .nav-burger { display: none; margin-left: auto; background: none; border: 1px solid var(--line-strong); border-radius: 10px; width: 40px; height: 40px; cursor: pointer; }
 .nav-sheet { display: none; }
-@media (max-width: 860px) {
+.nav-links a { white-space: nowrap; }
+@media (max-width: 1180px) {
   .nav-links, .nav-cta { display: none; }
   .nav-burger { display: grid; place-items: center; }
   .nav-sheet.open {
@@ -307,3 +308,36 @@ section { position: relative; }
 .netswitch .dot.testnet { background: var(--amber); }
 .netswitch .dot.mainnet { background: var(--green); }
 .nav-sheet .netswitch { margin: 12px 0 4px; align-self: flex-start; }
+
+/* Wallet */
+.wallet { position: relative; }
+.wallet-btn { gap: 8px; }
+.wallet-btn.block, .wallet.block, .wallet.block .wallet-btn { width: 100%; justify-content: center; }
+.wallet-menu {
+  position: absolute; right: 0; top: calc(100% + 8px); width: 280px; z-index: 60;
+  background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--radius);
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.8); padding: 6px; display: grid;
+}
+.wallet.block .wallet-menu { position: static; width: auto; margin-top: 8px; box-shadow: none; }
+.wallet-menu-head { padding: 10px 10px 12px; display: grid; gap: 4px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.wallet-menu-head a { color: var(--text); }
+.wallet-menu-bal { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.wallet-menu-bal div { display: grid; gap: 2px; font-size: 13px; }
+.wallet-menu a, .wallet-menu button {
+  text-align: left; background: none; border: 0; color: var(--text); font: inherit; font-size: 14px;
+  padding: 9px 10px; border-radius: var(--radius-sm); cursor: pointer;
+}
+.wallet-menu a:hover, .wallet-menu button:hover { background: rgba(255, 255, 255, 0.06); }
+.wallet-menu .danger { color: #ff8a8a; }
+.nav-sheet .wallet a, .nav-sheet .wallet button { border-bottom: 0; }
+
+/* Steps on the faucet and clause pages */
+.steps { display: grid; gap: 14px; counter-reset: step; }
+.step { display: grid; grid-template-columns: 32px 1fr; gap: 14px; align-items: start; }
+.step-num { width: 32px; height: 32px; border-radius: 999px; display: grid; place-items: center; font-family: var(--font-mono); font-size: 13px; border: 1px solid var(--line-strong); color: var(--muted); }
+.step.done .step-num { background: var(--violet-soft); border-color: var(--violet); color: var(--violet-2); }
+.step h3 { margin: 4px 0 6px; font-size: 16px; }
+.step p { margin: 0 0 10px; }
+.wallet-btn .dot { width: 7px; height: 7px; border-radius: 50%; }
+.wallet-btn .dot.testnet { background: var(--amber); }
+.wallet-btn .dot.mainnet { background: var(--green); }

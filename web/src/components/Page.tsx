@@ -16,7 +16,7 @@ export function ApiDown({ message }: { message: string }) {
   return (
     <div className="notice" role="status">
       <span>
-        {message} Run <code className="mono">npm run dev -- serve</code> from the repository, or set the API address in Desk settings.
+        {message} {location.hostname === "localhost" || location.hostname === "127.0.0.1" ? <>Run <code className="mono">npm run dev -- serve</code> from the repository, or set the API address in Desk settings.</> : "Try again in a moment."}
       </span>
     </div>
   );
