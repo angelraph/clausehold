@@ -79,6 +79,7 @@ export default function ClauseDetail() {
             {row.inviteId && <><dt>Payee link</dt><dd><Link className="mono" to={`/w/${row.inviteId}`}>/w/{row.inviteId.slice(0, 10)}...</Link></dd></>}
             {row.clauseAccountId && <><dt>Receipt</dt><dd><Link className="mono" to={`/r/${row.clauseAccountId}`}>View receipt</Link></dd></>}
           </dl>
+          {row.clauseAccountId && (status === "open" || status === "funded") && <ClauseActions proposalId={p.id} />}
         </div>
 
         <div className="card card-pad">
@@ -122,5 +123,32 @@ export default function ClauseDetail() {
         </div>
       </div>
     </>
+  );
+}
+
+function ClauseActions({ proposalId }: { proposalId: string }) {
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function run(kind: "fund" | "return") {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = kind === "fund" ? await api.checkFunding(proposalId) : await api.returnToBuyer(proposalId);
+      setMsg({ ok: true, text: `Done. Status now ${r.status.replace("CLAUSE_", "").toLowerCase()}. Reload to see it.` });
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof ApiError ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div style={{ display: "grid", gap: 10, marginTop: 20 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => run("fund")}>Check funding</button>
+        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => run("return")}>Return to buyer</button>
+      </div>
+      <p className="faint" style={{ fontSize: 13, margin: 0 }}>Return works only after the deadline, and only if nothing was delivered.</p>
+      {msg && <div className={`notice ${msg.ok ? "notice-green" : "notice-red"}`}>{msg.text}</div>}
+    </div>
   );
 }
