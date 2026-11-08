@@ -345,3 +345,6 @@ section { position: relative; }
 .wallet-btn .dot { width: 7px; height: 7px; border-radius: 50%; }
 .wallet-btn .dot.testnet { background: var(--amber); }
 .wallet-btn .dot.mainnet { background: var(--green); }
+.wallet-error { position: absolute; right: 0; top: calc(100% + 8px); width: 260px; z-index: 60; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg-2); border: 1px solid rgba(255, 120, 120, 0.4); color: #ffb3b3; font-size: 13px; line-height: 1.45; }
+.wallet.block .wallet-error, .fstep .wallet-error { position: static; width: auto; margin-top: 8px; }
+.wallet-btn:disabled { opacity: 0.85; cursor: progress; }

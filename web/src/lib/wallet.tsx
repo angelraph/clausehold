@@ -50,6 +50,31 @@ function lastValue(outcome: unknown): unknown {
   }
 }
 
+class TimeoutError extends Error {}
+
+const rememberKey = (net: string) => `clausehold.wallet.${net}`;
+
+function rememberedWallet(net: string): boolean {
+  try {
+    return localStorage.getItem(rememberKey(net)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberWallet(net: string, on: boolean): void {
+  try {
+    if (on) localStorage.setItem(rememberKey(net), "1");
+    else localStorage.removeItem(rememberKey(net));
+  } catch {
+    /* private mode: the wallet reconnects on the next click instead */
+  }
+}
+
+function within<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new TimeoutError("timed out")), ms))]);
+}
+
 function friendly(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (/reject|cancel|denied|closed/i.test(msg)) return "You closed the wallet without signing";
@@ -65,21 +90,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // One connector per network. Loaded on demand, so the landing page stays light.
-  useEffect(() => {
-    let live = true;
-    setReady(false);
-    setAccountId(null);
-    setWalletName(null);
-    (async () => {
-      const { NearConnector } = await import("@hot-labs/near-connect");
-      if (!live) return;
-      const connector = new NearConnector({
-        network: network.id,
-        footerBranding: null,
-      });
-      connectorRef.current = connector;
+  // The wallet library loads only when it is needed: on the first click of
+  // Connect wallet, or when this browser connected a wallet before. A visitor
+  // who never touches the wallet runs none of its code.
+  const connectorPromise = useRef<Promise<NearConnector> | null>(null);
+  const liveRef = useRef(true);
+
+  const ensureConnector = useCallback((): Promise<NearConnector> => {
+    if (connectorPromise.current) return connectorPromise.current;
+    const net = network.id;
+    const created = import("@hot-labs/near-connect").then(({ NearConnector }) => {
+      const connector = new NearConnector({ network: net, footerBranding: null });
       connector.on("wallet:signIn", async (t) => {
+        if (!liveRef.current) return;
+        rememberWallet(net, true);
         setAccountId(t.accounts[0]?.accountId ?? null);
         try {
           setWalletName((await connector.wallet()).manifest.name);
@@ -88,53 +112,76 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         }
       });
       connector.on("wallet:signOut", () => {
+        rememberWallet(net, false);
+        if (!liveRef.current) return;
         setAccountId(null);
         setWalletName(null);
       });
-      try {
-        await connector.whenManifestLoaded;
-        const { wallet, accounts } = await connector.getConnectedWallet();
-        if (live) {
-          setAccountId(accounts[0]?.accountId ?? null);
-          setWalletName(wallet.manifest.name);
-        }
-      } catch {
-        /* nobody connected on this network yet */
-      }
-      if (live) setReady(true);
-    })().catch(() => live && setReady(true));
-    return () => {
-      live = false;
-      connectorRef.current?.removeAllListeners();
-      connectorRef.current = null;
-    };
+      connectorRef.current = connector;
+      return connector;
+    });
+    created.catch(() => {
+      connectorPromise.current = null;
+    });
+    connectorPromise.current = created;
+    return created;
   }, [network.id]);
 
+  useEffect(() => {
+    liveRef.current = true;
+    setReady(true);
+    setAccountId(null);
+    setWalletName(null);
+    // Only a returning wallet user pays for loading the library on page load.
+    if (rememberedWallet(network.id)) {
+      ensureConnector()
+        .then(async (c) => {
+          await within(c.whenManifestLoaded, 15000);
+          const { wallet, accounts } = await within(c.getConnectedWallet(), 8000);
+          if (liveRef.current && accounts[0]) {
+            setAccountId(accounts[0].accountId);
+            setWalletName(wallet.manifest.name);
+          } else if (!accounts[0]) {
+            rememberWallet(network.id, false);
+          }
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      liveRef.current = false;
+      connectorRef.current?.removeAllListeners();
+      connectorRef.current = null;
+      connectorPromise.current = null;
+    };
+  }, [network.id, ensureConnector]);
+
   const connect = useCallback(async () => {
-    const c = connectorRef.current;
-    if (!c) return;
     setBusy(true);
     setError(null);
     try {
-      await c.whenManifestLoaded;
+      const c = await within(ensureConnector(), 15000);
+      await within(c.whenManifestLoaded, 15000);
       await c.connect();
     } catch (e) {
-      setError(friendly(e));
+      setError(e instanceof TimeoutError ? "The wallet list did not load. Check your connection and try again." : friendly(e));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [ensureConnector]);
 
   const disconnect = useCallback(async () => {
     const c = connectorRef.current;
     if (!c) return;
     try {
-      await c.disconnect();
+      await within(c.disconnect(), 8000);
+    } catch {
+      /* the wallet did not answer; forget it here anyway */
     } finally {
+      rememberWallet(network.id, false);
       setAccountId(null);
       setWalletName(null);
     }
-  }, []);
+  }, [network.id]);
 
   const call = useCallback(
     async (fc: FunctionCall): Promise<CallResult> => {
