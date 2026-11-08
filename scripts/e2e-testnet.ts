@@ -61,6 +61,18 @@ function workerKey() {
   return { pair, publicKey: pair.getPublicKey().toString() };
 }
 
+/** The clause the factory made for this worker key, read from its recent clauses. */
+async function clauseForKey(factory: string, workerPk: string): Promise<string | null> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const count = (await provider.callFunction({ contractId: factory, method: "clause_count", args: {} })) as number;
+    const recent = (await provider.callFunction({ contractId: factory, method: "get_clauses", args: { from_index: Math.max(0, count - 50), limit: 50 } })) as Array<{ account_id: string; worker_pk: string }>;
+    const hit = recent.find((c) => c.worker_pk === workerPk);
+    if (hit) return hit.account_id;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  return null;
+}
+
 async function main() {
   console.log(`Desk ${API}\nBuyer ${BUYER}, payee ${PAYEE}, ${AMOUNT} mUSD`);
   const buyer = buyerAccount();
@@ -84,14 +96,23 @@ async function main() {
   if (!opened.invite) throw new Error(`The mandate refused the clause (${opened.verdict.decision})`);
   console.log(`   verdict ${opened.verdict.decision}, invite ${opened.invite.inviteId}`);
 
-  step(2, "The editor binds a key, and the desk writes the clause");
+  step(2, "The editor binds a key, and the clause is written bound to it");
   const key = workerKey();
   const bound = await desk<{ invite: { status: string; clauseAccountId: string | null }; pendingReason: string | null }>(`/invites/${opened.invite.inviteId}/key`, {
     method: "POST",
     body: JSON.stringify({ publicKey: key.publicKey, keySource: "browser-random" }),
   });
-  const clause = bound.invite.clauseAccountId;
-  if (bound.invite.status !== "written" || !clause) throw new Error(`Clause not written: ${bound.pendingReason ?? bound.invite.status}`);
+  let clause = bound.invite.clauseAccountId;
+  if (bound.invite.status !== "written" || !clause) {
+    // A desk in wallet mode leaves the writing to the buyer, as the website does: it hands over
+    // the exact create_clause call, the buyer signs and pays for it, and the desk checks the result on chain.
+    const call = await desk<{ receiverId: string; methodName: string; args: Record<string, unknown>; deposit: string; gas: string }>(`/invites/${opened.invite.inviteId}/create`);
+    const sent = await buyer.callFunctionRaw({ contractId: call.receiverId, methodName: call.methodName, args: call.args, deposit: BigInt(call.deposit), gas: BigInt(call.gas) });
+    clause = await clauseForKey(call.receiverId, key.publicKey);
+    if (!clause) throw new Error("The factory did not create the clause; the deposit was refunded");
+    await desk(`/invites/${opened.invite.inviteId}/written`, { method: "POST", body: JSON.stringify({ clauseAccountId: clause, txHash: sent.transaction.hash }) });
+    console.log(`   written by the buyer's own key, tx ${sent.transaction.hash}`);
+  }
   console.log(`   ${clause}`);
   const keys = await provider.viewAccessKeyList({ accountId: clause });
   console.log(`   keys on the clause: ${keys.keys.map((k) => `${k.public_key} (${typeof k.access_key.permission === "string" ? k.access_key.permission : "FunctionCall"})`).join(", ")}`);
