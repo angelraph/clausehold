@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ApiDown, PageHead, shortDate, timeLeft } from "../components/Page";
+import { ApiDown, PageHead, deadlineNote, shortDate } from "../components/Page";
 import { StatusChip } from "../components/Status";
 import { WalletButton } from "../components/WalletButton";
 import { api, ApiError, statusOf, type DeskClause } from "../lib/api";
 import { tokenBalance, toBaseUnits6, view } from "../lib/chain";
-import { explorerAccount, useNetwork, type NetworkProfile } from "../lib/network";
+import { assetLabel, explorerAccount, useNetwork, type NetworkProfile } from "../lib/network";
 import { useWallet } from "../lib/wallet";
 
 const STEPS = ["awaiting", "open", "funded", "delivered", "released"] as const;
@@ -14,6 +14,7 @@ export default function ClauseDetail() {
   const { id = "" } = useParams();
   const [row, setRow] = useState<DeskClause | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { network } = useNetwork();
 
   const load = useCallback(
     () =>
@@ -50,10 +51,10 @@ export default function ClauseDetail() {
       <PageHead eyebrow={row.clauseAccountId ?? "Not written on chain yet"} title={p.terms}>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <StatusChip status={status} />
-          <span className="mono">{p.amount.toFixed(2)} {p.asset}</span>
+          <span className="mono">{p.amount.toFixed(2)} {assetLabel(network, p.asset)}</span>
           <span className="faint">to</span>
           <Link className="mono" to={`/s/${p.payee}`}>{p.payee}</Link>
-          <span className="faint">{timeLeft(p.deadline)}</span>
+          {deadlineNote(status, p.deadline) && <span className="faint">{deadlineNote(status, p.deadline)}</span>}
         </div>
       </PageHead>
       <div className="wrap grid-2" style={{ paddingBottom: 96, alignItems: "start" }}>
@@ -155,6 +156,13 @@ function BuyerPanel({ row, status, onChange }: { row: DeskClause; status: Status
   let body: React.ReactNode;
   if (status === "refused") {
     body = <p className="muted">The mandate refused this clause before anyone signed, so nothing was written and no money moved.</p>;
+  } else if (status === "expired") {
+    body = (
+      <div style={{ display: "grid", gap: 12, justifyItems: "start" }}>
+        <p className="muted" style={{ margin: 0 }}>The deadline passed before this clause was written on chain, so nothing was signed and no money moved.</p>
+        <Link className="btn btn-ghost btn-sm" to={`/desk/new?payee=${encodeURIComponent(p.payee)}`}>Write it again</Link>
+      </div>
+    );
   } else if (status === "awaiting" && row.inviteStatus === "awaiting_key") {
     body = (
       <div style={{ display: "grid", gap: 10 }}>

@@ -6,7 +6,7 @@ import { LogoMark } from "../components/Logo";
 import { api, ApiError, type InviteView } from "../lib/api";
 import { createWorkerKey, ed25519Supported, loadWorkerKey, type WorkerKey } from "../lib/workerKey";
 import { hashFile, hashText, submitDelivery } from "../lib/deliver";
-import { explorerAccount, useNetwork } from "../lib/network";
+import { assetLabel, explorerAccount, useNetwork } from "../lib/network";
 
 /**
  * The page the person being paid opens. No wallet, no sign-up: their
@@ -21,6 +21,7 @@ export default function Invite() {
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const [supported, setSupported] = useState(true);
+  const { network } = useNetwork();
 
   const refresh = () =>
     api
@@ -50,6 +51,10 @@ export default function Invite() {
     }
   }
 
+  // Past the deadline and never written on chain: accepting now would lead nowhere.
+  const lapsed = !!inv && inv.status !== "written" && new Date(inv.deadline).getTime() <= Date.now();
+  const settled = inv?.chainStatus === "CLAUSE_RELEASED" || inv?.chainStatus === "CLAUSE_RETURNED";
+
   return (
     <div className="wrap" style={{ maxWidth: 640, padding: "64px 16px 96px" }}>
       <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
@@ -61,14 +66,18 @@ export default function Invite() {
           <div className="eyebrow">You have been offered a job</div>
           <h1 className="h2" style={{ fontSize: 32, marginTop: 12 }}>{inv.terms}</h1>
           <div className="mini" style={{ marginTop: 20 }}>
-            <div className="mini-row"><span className="faint">You receive</span><span className="mono" style={{ color: "var(--text)" }}>{inv.amount.toFixed(2)} {inv.asset}</span></div>
+            <div className="mini-row"><span className="faint">You receive</span><span className="mono" style={{ color: "var(--text)" }}>{inv.amount.toFixed(2)} {assetLabel(network, inv.asset)}</span></div>
             <div className="mini-row"><span className="faint">Paid to</span><span className="mono">{inv.payee}</span></div>
             <div className="mini-row"><span className="faint">From</span><span className="mono">{inv.buyer}</span></div>
-            <div className="mini-row"><span className="faint">Deliver within</span><span>{timeLeft(inv.deadline)}</span></div>
-            <div className="mini-row"><span className="faint">Status</span><StatusChip status={inv.status === "written" ? "open" : "awaiting"} /></div>
+            <div className="mini-row"><span className="faint">Deliver within</span><span>{settled ? "Settled" : timeLeft(inv.deadline)}</span></div>
+            <div className="mini-row"><span className="faint">Status</span><StatusChip status={lapsed ? "expired" : inv.status === "written" ? "open" : "awaiting"} /></div>
           </div>
 
-          {inv.status === "awaiting_key" && (
+          {lapsed && (
+            <div className="notice" style={{ marginTop: 22 }}>This invite expired before the clause was written, so nothing was signed and no money moved. Ask the buyer for a new link.</div>
+          )}
+
+          {inv.status === "awaiting_key" && !lapsed && (
             <div style={{ marginTop: 22, display: "grid", gap: 12 }}>
               <p className="muted" style={{ margin: 0, fontSize: 15 }}>
                 Accepting creates a key in this browser. It is the only key the clause will accept, and it can do one thing: submit your delivery. It can never move money.
@@ -79,7 +88,7 @@ export default function Invite() {
             </div>
           )}
 
-          {inv.status !== "awaiting_key" && (
+          {inv.status !== "awaiting_key" && !lapsed && (
             <div style={{ marginTop: 22, display: "grid", gap: 12 }}>
               <div className={`notice ${inv.status === "written" ? "notice-green" : "notice-violet"}`}>
                 {inv.status === "written"

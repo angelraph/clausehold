@@ -172,7 +172,7 @@ section { position: relative; }
 .chip-funded { color: var(--amber); border-color: rgba(245, 181, 68, 0.3); background: rgba(245, 181, 68, 0.08); }
 .chip-delivered { color: var(--violet-2); border-color: rgba(168, 116, 255, 0.35); background: var(--violet-soft); }
 .chip-released { color: var(--green); border-color: rgba(61, 220, 151, 0.3); background: rgba(61, 220, 151, 0.08); }
-.chip-returned { color: #c9c5d8; border-color: var(--line-strong); background: rgba(255, 255, 255, 0.05); }
+.chip-returned, .chip-expired { color: #c9c5d8; border-color: var(--line-strong); background: rgba(255, 255, 255, 0.05); }
 .chip-frozen, .chip-refused { color: var(--red); border-color: rgba(255, 92, 108, 0.3); background: rgba(255, 92, 108, 0.08); }
 .chip-awaiting { color: var(--muted); }
 

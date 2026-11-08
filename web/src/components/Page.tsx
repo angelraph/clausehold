@@ -27,6 +27,13 @@ export function shortDate(iso: string): string {
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+const SETTLED = new Set(["released", "returned", "refused", "expired"]);
+
+/** The countdown for a clause, or nothing once it is settled and the deadline no longer matters. */
+export function deadlineNote(status: string, iso: string): string {
+  return SETTLED.has(status) ? "" : timeLeft(iso);
+}
+
 export function timeLeft(iso: string): string {
   const ms = new Date(iso).getTime() - Date.now();
   if (ms <= 0) return "expired";

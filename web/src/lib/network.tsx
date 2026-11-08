@@ -37,6 +37,11 @@ export const NETWORKS: Record<NetworkId, NetworkProfile> = {
   },
 };
 
+/** On testnet the USDC slot is filled by mUSD, the free test token, so say that. */
+export function assetLabel(network: NetworkProfile, asset: string): string {
+  return network.id === "testnet" && asset === "USDC" ? "mUSD" : asset;
+}
+
 const KEY = "clausehold.network";
 
 /** The network this browser last chose. Testnet unless the person switched, so anyone can try it without real money. */
