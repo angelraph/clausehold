@@ -35,10 +35,17 @@ export function WalletButton({ block = false }: { block?: boolean }) {
 
   if (!w.accountId) {
     return (
-      <button className={`btn btn-ghost btn-sm wallet-btn ${block ? "block" : ""}`} onClick={w.connect} disabled={!w.ready || w.busy}>
-        <WalletIcon />
-        {w.busy ? "Opening wallets" : "Connect wallet"}
-      </button>
+      <div className={`wallet ${block ? "block" : ""}`}>
+        <button className={`btn btn-ghost btn-sm wallet-btn ${block ? "block" : ""}`} onClick={w.connect} disabled={w.busy}>
+          <WalletIcon />
+          {w.busy ? "Opening wallets" : "Connect wallet"}
+        </button>
+        {w.error && (
+          <div className="wallet-error" role="alert">
+            {w.error}
+          </div>
+        )}
+      </div>
     );
   }
 
