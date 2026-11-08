@@ -1,7 +1,8 @@
-export type ClauseStatus = "awaiting" | "open" | "funded" | "delivered" | "released" | "returned" | "frozen" | "refused";
+export type ClauseStatus = "awaiting" | "expired" | "open" | "funded" | "delivered" | "released" | "returned" | "frozen" | "refused";
 
 const LABEL: Record<ClauseStatus, string> = {
   awaiting: "Waiting for key",
+  expired: "Expired",
   open: "Open",
   funded: "Funded",
   delivered: "Delivered",

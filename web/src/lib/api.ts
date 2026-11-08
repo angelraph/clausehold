@@ -189,7 +189,7 @@ export const api = {
   returnToBuyer: (proposalId: string) => call<{ txHash: string; status: string }>(`/clauses/${encodeURIComponent(proposalId)}/return`, { method: "POST", auth: true }),
 };
 
-export function statusOf(c: DeskClause): "refused" | "awaiting" | "open" | "funded" | "delivered" | "released" | "returned" | "frozen" {
+export function statusOf(c: DeskClause): "refused" | "awaiting" | "expired" | "open" | "funded" | "delivered" | "released" | "returned" | "frozen" {
   if (c.decision === "VETO") return "refused";
   const e = c.lastEvent;
   if (e === "CLAUSE_RELEASED") return "released";
@@ -198,5 +198,7 @@ export function statusOf(c: DeskClause): "refused" | "awaiting" | "open" | "fund
   if (e === "CLAUSE_DELIVERED") return "delivered";
   if (e === "CLAUSE_FUNDED") return "funded";
   if (c.inviteStatus === "written") return "open";
+  // Never written on chain and past its deadline: nothing can happen to it any more.
+  if (!c.clauseAccountId && new Date(c.proposal.deadline).getTime() <= Date.now()) return "expired";
   return "awaiting";
 }

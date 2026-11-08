@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiDown, PageHead, shortDate, timeLeft } from "../components/Page";
+import { ApiDown, PageHead, deadlineNote, shortDate } from "../components/Page";
 import { StatusChip } from "../components/Status";
 import { api, ApiError, loadSettings, saveSettings, statusOf, type DeskClause, type DeskSettings } from "../lib/api";
+import { assetLabel, useNetwork } from "../lib/network";
 
 function Settings({ onSaved }: { onSaved: () => void }) {
   const [s, setS] = useState<DeskSettings>(loadSettings());
@@ -33,6 +34,7 @@ export default function Desk() {
   const [rows, setRows] = useState<DeskClause[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const { network } = useNetwork();
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -79,13 +81,13 @@ export default function Desk() {
                       <div className="faint" style={{ fontSize: 12 }}>{shortDate(r.proposal.submittedAt)}</div>
                     </td>
                     <td className="mono">{r.proposal.payee}</td>
-                    <td className="mono">{r.proposal.amount.toFixed(2)} {r.proposal.asset}</td>
+                    <td className="mono">{r.proposal.amount.toFixed(2)} {assetLabel(network, r.proposal.asset)}</td>
                     <td>
                       <StatusChip status={statusOf(r)} />
                       {r.refusedBy.length > 0 && <div className="faint" style={{ fontSize: 12, marginTop: 4 }}>{r.refusedBy.join(", ")}</div>}
                     </td>
                     <td className="mono faint">{r.clauseAccountId ?? "not written yet"}</td>
-                    <td className="faint">{r.decision === "VETO" ? "" : timeLeft(r.proposal.deadline)}</td>
+                    <td className="faint">{deadlineNote(statusOf(r), r.proposal.deadline)}</td>
                   </tr>
                 ))}
               </tbody>

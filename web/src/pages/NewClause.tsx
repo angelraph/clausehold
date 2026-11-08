@@ -74,7 +74,7 @@ export default function NewClause() {
             <div className="field">
               <label htmlFor="asset">Asset</label>
               <select id="asset" className="select" value={form.asset} onChange={set("asset")}>
-                <option>USDC</option>
+                <option value="USDC">{network.id === "testnet" ? "mUSD (free test dollars)" : "USDC"}</option>
               </select>
             </div>
             <div className="field">
