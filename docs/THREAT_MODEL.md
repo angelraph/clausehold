@@ -1,63 +1,110 @@
 # Threat model
 
-What CHARTER is meant to protect, who it assumes can do what, and where the protection stops. This is written to be checked against the code, not to reassure.
+This is what Clausehold protects, who might attack it, what stops them, and what it does not protect against. Every claim about the contracts points at a guard in `contracts/` and a test that exercises it. Where something is a known weakness, it says so.
 
 ## What is being protected
 
-An exchange account's funds, from an autonomous agent that trades on it. The specific risks are an agent placing trades outside what its operator meant to allow, an agent talking its way past a human check, and the record of what happened being changed afterward.
+1. **The money in a clause.** Tokens sitting in `r-<n>.<factory>` must leave only to the payee after a valid delivery, or to the buyer after expiry or a settled dispute.
+2. **The treasury behind the mandate.** No clause may break the mandate's caps, asset list or new-payee ceiling, whoever proposes it.
+3. **The record.** Receipts and standing must reflect what actually happened on chain, so a payee's track record cannot be inflated or erased.
 
-## Actors
+## Who is involved
 
-- **Agent.** Software that proposes trades. Untrusted. It may be buggy, manipulated by its inputs, or hostile.
-- **Approver / operator.** A person who decides escalations and can halt trading. Trusted to act in good faith, and identified.
-- **CHARTER host.** The machine running CHARTER, holding the audit log and the exchange credentials. Trusted.
-- **The exchange.** Trusted to execute correctly. Out of scope.
+| actor | can do | trusted for |
+|---|---|---|
+| Buyer | write and fund a clause from their own wallet, freeze inside a review window, vote in a dispute | nothing beyond their own money |
+| Payee | hold the worker key for one clause and submit a delivery with it | nothing |
+| Desk (our API) | check clauses before signing, store invites, relay deliveries, run the website | availability only, never custody |
+| Factory owner | set the mandate, change the code used for future clauses, hand ownership to a DAO | the mandate's content |
+| Mandate co-signer | break a tie when a buyer freezes a clause | fairness in disputes, only when a review window is used |
+| Anyone else | call the public methods: `sync_funding`, `release`, `expire`, `report_outcome`, and `create_clause` when the mandate leaves it open | nothing |
 
-## Trust boundary
+## Where trust stops
 
-CHARTER enforces limits only on trades that go through it. For that to mean anything, CHARTER must be the only holder of the exchange credentials. An agent that holds its own exchange key can trade without CHARTER, and nothing in this codebase can stop it. This is a property of how it is deployed, not something the software can guarantee. If you are not prepared to keep exchange credentials away from agents, CHARTER is advisory, not enforcing.
+The chain is the authority. The desk is a convenience in front of it.
+
+- The desk holds **no money and no key to any clause**. On the hosted desk, the buyer's wallet signs `create_clause` and the funding transfer; the desk only reads the result back from chain (`src/invites/wallet.ts`, `recordWalletClause`) before linking it.
+- The desk's mandate check runs before any signature so it can name the broken rule. The same rules run inside `create_clause`, and that check is the one that counts.
+- The desk's audit log is hash-chained, but it is a mirror of the chain's NEP-297 events, not the record.
 
 ## Controls, and what each defends against
 
-| Threat | Control | Where |
-| --- | --- | --- |
-| Agent exceeds size, symbol, side, spend, slippage, or drawdown limits | Six rules evaluated against a live simulation; any violation is a VETO and nothing reaches the exchange | `src/policy/engine.ts`, `src/policy/rules/` |
-| Agent reaches the exchange without a passing verdict | Execution has a single entry point that refuses anything but PASS or an approved ESCALATE; a test asserts a VETO never calls the venue | `src/execution/adapter.ts` |
-| Agent approves its own escalation | Deciding needs a separate credential the agent does not hold; the approver may not be the proposing agent | `src/api/server.ts`, `src/approval/service.ts` |
-| Agent impersonates another agent | Identity comes from the agent's own key, never from the request body; a body naming another agent is refused | `src/api/server.ts` |
-| Agent uses a mandate it was not given | Each agent is bound to specific mandates at registration | `src/agents/` |
-| Agent reads another agent's results | Status and escalation lookups are scoped to the caller; someone else's is reported as not found | `src/api/server.ts` |
-| A leaked or retired agent key keeps working | Keys are revocable and rotatable with immediate effect; only a hash is stored, and the key is shown once | `src/agents/service.ts` |
-| Revoking the last agent reopens the API to everyone | Once any agent has been registered, an unauthenticated call is refused even if all are revoked | `registryInUse` in `src/agents/service.ts` |
-| Approval replayed, or two approvals race | An approval is granted once; a per-id guard covers simultaneous requests | `src/approval/service.ts` |
-| Approval acted on after conditions changed | The proposal is evaluated again, with fresh market data, spend, drawdown, and kill switch, at the moment of approval | `src/approval/service.ts` |
-| Approval acted on after it went stale | Approvals expire | `src/approval/state.ts` |
-| Trading must stop now | Kill switch vetoes everything, including an already-approved trade not yet executed. `--cancel-open` also pulls resting orders off the book | `src/policy/rules/killSwitch.ts`, `src/execution/orders.ts` |
-| A limit price typo, or too many resting orders | Limit price must be near the market; the number of resting orders is capped | `src/policy/rules/orders.ts` |
-| A runaway agent trading too often | Per-agent hourly trade limit, per-symbol cooldown, and a per-symbol daily cap | `src/policy/rules/activity.ts` |
-| Selling something not held | A sell must be covered by holdings, and is refused if holdings cannot be read | `src/policy/rules/orders.ts` |
-| The record is edited after the fact | Hash-chained log; edits, reordering, and deletions are detected by `audit verify` | `src/audit/log.ts` |
-| Acting on a tampered record | The chain is verified before an approval is acted on | `src/approval/service.ts` |
-| Timing attacks on key comparison | Constant-time comparison for every credential | `constantTimeEquals` |
-| Error responses leak internals | Malformed input returns a plain 400; unexpected errors return no stack trace or paths | `src/api/server.ts` |
+### A clause account has one key, and it can only deliver
 
-## What this does not protect against
+`create_clause` creates `r-<n>` with exactly one access key: a function-call key for the payee's `worker_pk`, receiver `r-<n>`, method `submit_delivery`, no deposit allowed. There is no full-access key, no owner method and no withdraw method.
 
-- **An agent with its own exchange credentials.** See the trust boundary above.
-- **A compromised CHARTER host.** Whoever controls the machine controls the audit file, the keys, and the process. The hash chain detects editing by someone who cannot recompute it; it does not stop someone who can rewrite the whole file from the beginning. There is no external anchor for the chain.
-- **A bad approver.** A person with the approver credential can approve something they should not. The approval is attributed and logged, which is accountability, not prevention.
-- **Approver identity over the API is asserted, not proven.** The approver key proves someone holds it; the `X-Charter-Approver` name is whatever they claim. Separate approvers should hold separate credentials, which today means separate deployments. The CLI records the operating-system username.
-- **One shared approver key.** Unlike agents, approvers do not yet each have their own key.
-- **Denial of service.** There is no rate limiting on the API beyond what the mandate rules impose on trading.
-- **Transport security.** The server speaks plain HTTP. Put it behind TLS if it is reachable beyond localhost.
-- **Testnet only.** Everything here has been exercised against Binance Spot Testnet. The mainnet execution path has not been run.
-- **Simulation is an estimate.** It walks a sampled order book and can understate the impact of a large order; it says so when the depth ran out, but it does not predict moves between simulation and fill.
-- **A halt does not undo what already happened.** It stops new proposals and, with `--cancel-open`, cancels resting orders. An order that has already filled stays filled.
-- **Resting orders are only counted, not watched.** A limit order can fill long after it was approved, at a market the rules never saw. The open-order cap and the spend caps bound this, and it can be cancelled, but nothing re-evaluates it while it rests.
-- **Portfolio value depends on prices the exchange reports.** Holdings with no price route are excluded from NAV and listed, so a portfolio with a lot of unpriceable assets is undervalued for the drawdown check.
+- Defends against: the desk, the factory owner, or anyone with the worker key draining a clause.
+- Tests: `worker_key_can_only_call_submit_delivery` (the key cannot call another method, another contract, or move NEAR, directly or by delegate), `no_withdraw_path_after_delivery`.
 
-## Assumptions worth stating
+### Delivery must come from the clause account itself
 
-- The audit file is only written by CHARTER. Two CHARTER processes writing the same file concurrently is not supported.
-- Agent keys and the approver key are kept secret by whoever holds them.
-- The system clock is roughly right; approval expiry depends on it.
+`submit_delivery` requires `predecessor == current_account_id`, which is only true when the worker's function-call key signed it, either directly or as a NEP-366 delegate that someone else relays. The contract never reads `signer_account_pk`.
+
+- Defends against: anyone else claiming delivery, including the desk.
+- Tests: `direct_submit_delivery_from_any_other_account_fails` (`ONLY_WORKER_KEY`), `happy_path_relayed_delivery_releases_in_same_call`.
+
+### Tokens can only go to two fixed accounts
+
+`buyer` and `payee` are written into the clause when it is created and never change. Every payout path (release, expire, cosign, sweep) sends to one of them. `ft_on_transfer` accepts only the configured token (`WRONG_ASSET`) and refunds anything above the clause amount.
+
+- Defends against: redirecting money after the fact. A stolen worker key can at worst claim delivery early, and the money still goes to the payee.
+
+### Payouts are retryable, never half-done
+
+Each payout runs `storage_deposit` → callback → `ft_transfer` → callback, and the state changes only in the last callback, which also reports to the factory. A failure anywhere logs `clause_settle_failed` and leaves the clause as it was, with `settling` cleared, so anyone can retry.
+
+- Defends against: money stuck because a receiver was not registered with the token, or a transfer failed midway.
+- Test: `failed_ft_transfer_leaves_clause_retryable`.
+
+### Expiry needs nobody's permission
+
+After the deadline, if nothing was delivered, anyone may call `expire` and the whole balance goes to the buyer. Before the deadline it fails (`NOT_EXPIRED`). In a settled clause, `sync_funding` sends any late or extra deposit to the buyer.
+
+- Defends against: a payee who disappears or loses their key, and a desk that goes offline. The money never needs us to come back.
+- Test: `expire_returns_to_buyer_and_frees_reservation`.
+
+### The mandate is enforced on chain
+
+`create_clause` checks, in order: paused, creators, allowed assets, per-clause cap, new-payee ceiling, per-payee daily cap, daily cap. It panics with `MANDATE:<rule>`, so nothing is created. The amount is reserved against the day's caps at creation; a return gives the reservation back, a release keeps it counted.
+
+- Defends against: an agent, a buggy desk or a direct contract call spending past the treasury's rules.
+- Test: `over_mandate_create_panics_and_reservation_blocks_next`.
+
+### Standing can only be written by real clauses
+
+`record_outcome` on the factory accepts calls only from the clause account `r-<id>` it created, so receipts and standing cannot be forged by anyone else.
+
+- Test: `record_outcome_only_from_own_clause`.
+
+### Disputes need two signatures
+
+With a review window above zero and a co-signer in the mandate, the buyer may `freeze` a delivered clause inside the window. A frozen clause moves only when the buyer and the co-signer cast the same vote with `cosign`.
+
+- Defends against: a buyer taking back money for delivered work on their own.
+- Test: `freeze_then_cosign_returns_to_buyer`.
+
+### The payee needs no wallet, and the key cannot hurt them
+
+The payee's browser makes the worker key, from a passkey where the browser supports it, otherwise from a secure random seed. The desk relays the signed delivery and pays the gas. The relayer validates the delegate (one `submit_delivery` action, sender and receiver both the clause, zero deposit) before spending gas on it, and the chain rejects anything else regardless.
+
+## Known weaknesses
+
+These are real, and some of them matter before a treasury uses this with real money.
+
+1. **Cap griefing while `creators` is empty.** On testnet the mandate leaves `creators` empty, so anyone may call `create_clause`, naming any buyer, without funding it. Each unfunded clause still reserves its amount against that UTC day's caps. Someone willing to lock about 1.97 NEAR per clause could fill a treasury's daily cap for the rest of the day. The fix exists: set `creators` in the mandate to the accounts allowed to write clauses. A real treasury should always set it.
+2. **A delivery is a hash, not proof of good work.** The contract checks who delivered, not what was delivered. With a review window of zero, any delivery releases the money at once. Buyers who need to check the work should set a review window and a co-signer.
+3. **The co-signer is trusted in disputes.** If the buyer and the co-signer collude, they can return a frozen clause even though the work was good. A payee should look at who the co-signer is before accepting. A DAO as co-signer spreads that trust.
+4. **The buyer's wallet signs what the desk prepares.** On the hosted desk, the `create_clause` arguments come from our API. A compromised API could hand the wallet a different payee or amount. The wallet shows the call before signing, and the desk checks the result on chain afterwards, but the buyer is the last line of defence: check the payee and amount in the wallet prompt.
+5. **The worker key lives in the browser.** It is kept in that browser's storage. Malicious code running on the site could read it, but the key can only claim delivery, and the money still goes to the payee. Clearing the browser loses the key; the clause then expires and returns.
+6. **The worker key can spend a little of the clause's NEAR.** It carries a 0.05 NEAR gas allowance so a payee can deliver directly without the relayer. Failed direct calls could burn up to that much of the clause's own NEAR, never its tokens.
+7. **Storage NEAR stays locked.** Each clause locks about 1.97 NEAR to store its code. There is no method to delete a settled clause and recover it. This has to come down before mainnet, with a smaller contract or NEAR's global contracts.
+8. **The factory owner controls future rules.** The owner can change the mandate and the code used for new clauses. Existing clauses keep their code and their buyer, payee and co-signer, but a malicious owner could loosen the caps for new ones. On testnet the owner is `clausehold.testnet`; moving it to a Sputnik DAO is the next step.
+9. **Funding from other chains trusts NEAR Intents.** On mainnet, a deposit from another chain sits with the 1Click and solver network until it is delivered to the clause on NEAR. Quotes are exact-output, so the clause receives exactly its amount, and refunds land on NEAR, but that leg is outside our contracts.
+10. **NEAR AI writes notes, it does not decide.** The note's hash may be stored with a delivery, but no model output ever moves money. A wrong or misleading note changes nothing on chain.
+
+## Assumptions
+
+- NEAR enforces function-call key permissions and NEP-366 delegate actions as specified.
+- The token contract follows NEP-141 and NEP-145. On testnet, `musd.clausehold.testnet` is a test token that anyone can mint, so testnet balances prove the flow, not value.
+- Block timestamps are accurate enough for deadlines measured in minutes.
+- Whoever holds the factory owner key acts in the treasury's interest until ownership moves to a DAO.
