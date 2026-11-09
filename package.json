@@ -8,6 +8,7 @@
     "dev": "tsx src/index.ts",
     "studio-agent": "tsx src/studio-agent/index.ts",
     "e2e:testnet": "tsx scripts/e2e-testnet.ts",
+    "dao:testnet": "tsx scripts/dao-testnet.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build": "tsc"

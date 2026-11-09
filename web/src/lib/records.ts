@@ -50,7 +50,23 @@ export interface Standing {
   as_buyer: RoleStats;
 }
 
-export const readClause = (network: NetworkProfile, account: string) => view<ClauseView>(network, account, "get_clause");
+/** The mandate as the factory stores it: token amounts in base units. */
+export interface ChainMandate {
+  allowed_assets: string[];
+  max_per_clause: string;
+  per_payee_daily_cap: string;
+  daily_cap: string;
+  new_payee_ceiling: string;
+  paused: boolean;
+  cosigner: string | null;
+  creators?: string[];
+}
+
+export const readFactoryOwner = (network: NetworkProfile) => view<string>(network, network.factory, "get_owner");
+
+export const readFactoryMandate = (network: NetworkProfile) => view<ChainMandate | null>(network, network.factory, "get_mandate");
+
+export const readClause =(network: NetworkProfile, account: string) => view<ClauseView>(network, account, "get_clause");
 
 export const readStanding = (network: NetworkProfile, account: string) => view<Standing>(network, network.factory, "standing", { account_id: account });
 
