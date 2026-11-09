@@ -82,7 +82,7 @@ This runs the same suite against the public testnet. Each test creates three fau
 
 ## Networks
 
-Both networks are live and run the same wasm:
+Both networks run the same wasm. Testnet is live; the mainnet factory is not deployed yet.
 
 | | testnet | mainnet |
 |---|---|---|

@@ -138,6 +138,8 @@ The hosted testnet desk is https://clausehold-api-testnet.vercel.app. The routes
 - **Tokens arrive late or twice.** After a clause settles, `sync_funding` sends any leftover balance to the buyer.
 - **A clause asks for too much.** The factory panics with the rule's name, and nothing is created.
 
+The full threat model, with the test behind each control and the known weaknesses, is in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+
 ## Honest limits
 
 - Writing a clause stores a small contract on chain, which locks about 1.97 NEAR from the buyer per clause. That is fine on testnet and too much for mainnet. We are cutting it before the mainnet launch.
