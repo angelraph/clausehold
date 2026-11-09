@@ -6,7 +6,7 @@ The money is held under a clause, and the clause is the only key that moves it. 
 
 - Live site: https://clausehold.vercel.app (Testnet by default, switch at the top)
 - Testnet factory: [`clausehold.testnet`](https://testnet.nearblocks.io/address/clausehold.testnet)
-- Built for NEAR HACKATHON, November 2026. Tracks: agents, realworld, security.
+- Built for NEAR HACKATHON, November 2026. Tracks: agents, realworld, social, security.
 
 ## The problem
 
@@ -62,6 +62,7 @@ Each of these does real work in the design. Take one away and the product stops 
 - **Fungible tokens (NEP-141).** Funding is `ft_transfer_call`; `ft_on_transfer` keeps the tokens while the clause is open and refunds anything extra. Payouts register the receiver's storage first, then transfer, and only change state in the final callback, so a failed payout can simply be retried.
 - **Events (NEP-297).** Every step logs a `clausehold` event. The desk mirrors them into a hash-chained log, but the chain is the record.
 - **NEAR Intents (mainnet).** A buyer can fund a clause from another chain. The 1Click quote is exact-output, so the clause receives exactly its amount on NEAR, and any refund lands on NEAR too.
+- **Sputnik DAO.** The factory belongs to a DAO. A treasury votes once on the rule, not on every invoice, and the same DAO settles disputes as co-signer.
 - **NEAR AI Cloud.** Turns a plain-English spending rule into a mandate and writes a short note about each delivery. It never decides whether money moves.
 
 ## The mandate
@@ -71,6 +72,19 @@ A treasury sets its rules once, and every clause is checked against them twice: 
 > Stablecoins only. No clause above $25. Anything above $15 needs a second person. At most $50 to any one payee a day and $200 in total a day. A payee who has never delivered gets at most $10. A clause may stay open for at most a week.
 
 The factory reserves each clause's amount against the daily caps when it is written. A returned clause gives the reservation back; a released one keeps it counted.
+
+### Owned by a DAO
+
+On testnet the factory belongs to a Sputnik DAO, [`clausehold-council.sputnikv2.testnet`](https://testnet.nearblocks.io/address/clausehold-council.sputnikv2.testnet). The rule changes only when the DAO votes for a proposal that calls `set_mandate`. Disputes on new clauses are settled with the DAO as co-signer.
+
+| step | transaction |
+|---|---|
+| create the DAO: one council member, a 1-of-1 vote | [`Faow7mFx…`](https://testnet.nearblocks.io/txns/Faow7mFxS4rjg9gsxNpjGmBfYzNoUqr4NKSiKvCJY95c) |
+| the factory's owner hands it to the DAO with `set_owner` | [`GmxPAgH6…`](https://testnet.nearblocks.io/txns/GmxPAgH6uXHxxzGSH6GLDYZMFNdA16r9jCMXraW995cq) |
+| proposal 0: make the DAO the co-signer, by calling the factory's `set_mandate` | [`5zRuj9Nb…`](https://testnet.nearblocks.io/txns/5zRuj9NbHSK7dvQkhvDUEdsZwUXfyb6SMNsg7RU6wFm5) |
+| the council approves it, and the DAO calls the factory | [`FwFoGeE3…`](https://testnet.nearblocks.io/txns/FwFoGeE3EU9Y1jLhPqx8AFMoXxxttddK98UP8QnTwbdz) |
+
+The [Mandate page](https://clausehold.vercel.app/mandate) reads the owner and the rule straight from the factory. `npm run dao:testnet` repeats these steps for another DAO; each step checks the chain first and skips what is already done.
 
 ## Run it yourself
 
@@ -144,7 +158,7 @@ The full threat model, with the test behind each control and the known weaknesse
 
 - Writing a clause stores a small contract on chain, which locks about 1.97 NEAR from the buyer per clause. That is fine on testnet and too much for mainnet. We are cutting it before the mainnet launch.
 - Funding through NEAR Intents is mainnet only, because 1Click has no testnet. On testnet, clauses are funded directly with mUSD.
-- The mandate on testnet is set by the factory owner. Moving it under a Sputnik DAO vote is the next step.
+- The testnet DAO has a single council member, so one vote passes a proposal. That proves the wiring; a real treasury would add its members and raise the threshold.
 
 ## What is in this repository
 
