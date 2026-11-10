@@ -50,7 +50,7 @@ async function refused(label: string, code: RegExp, attempt: () => Promise<unkno
   } catch (err) {
     const msg = err instanceof Error ? `${err.message} ${JSON.stringify((err as { cause?: unknown }).cause ?? "")}` : String(err);
     const hit = msg.match(code);
-    if (hit) ok(label, `refused: ${hit[0]}`);
+    if (hit) ok(label, `refused: ${msg.slice(Math.max(0, (hit.index ?? 0) - 40), (hit.index ?? 0) + hit[0].length + 40).replace(/\s+/g, " ").trim()}`);
     else bad(label, `refused, but not with ${code}: ${msg.slice(0, 220)}`);
   }
 }
