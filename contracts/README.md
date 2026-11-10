@@ -83,7 +83,7 @@ This runs the same suite against the public testnet. Each test creates three fau
 
 ## Networks
 
-Both networks run the same wasm. Testnet is live; the mainnet factory is not deployed yet.
+Both networks run the same wasm, and both are live: the mainnet factory clausehold.near ran its first clause with real USDC (see the main README).
 
 | | testnet | mainnet |
 |---|---|---|

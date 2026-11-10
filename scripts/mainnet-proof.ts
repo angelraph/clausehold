@@ -183,9 +183,10 @@ async function main() {
         depositType: "ORIGIN_CHAIN",
         destinationAsset: dest.assetId,
         amount: "2000000",
-        refundTo: "0x0000000000000000000000000000000000000000",
-        refundType: "ORIGIN_CHAIN",
-        recipient: clause,
+        // Refunds land on NEAR, never back on the source chain. The clause itself is closed by now, so quote into the payee.
+        refundTo: FACTORY,
+        refundType: "INTENTS",
+        recipient: payee,
         recipientType: "DESTINATION_CHAIN",
         deadline: new Date(Date.now() + 3600_000).toISOString(),
       }),
