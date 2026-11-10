@@ -460,3 +460,82 @@ fn report_outcome_needs_terminal_state() {
     let c = funded(0);
     c.report_outcome();
 }
+
+// ------------------------------------------------------------------ close
+
+fn released() -> Clause {
+    let mut c = funded(0);
+    set(me(), T0 + 10 * SEC);
+    c.submit_delivery("deliveryhash".into(), None);
+    set_with_result(me(), T0 + 11 * SEC, PromiseResult::Successful(vec![]));
+    c.on_transferred(Payout::Release, payee(), U128(AMOUNT));
+    c
+}
+
+#[test]
+#[should_panic(expected = "NOT_TERMINAL")]
+fn close_needs_a_settled_clause() {
+    let mut c = funded(0);
+    set(acc("anyone.near"), T0 + 20 * SEC);
+    c.close();
+}
+
+#[test]
+#[should_panic(expected = "NOT_REPORTED")]
+fn close_waits_for_the_factory_record() {
+    let mut c = released();
+    assert_eq!(c.get_state(), State::Released);
+    assert!(!c.get_clause().reported);
+    set(acc("anyone.near"), T0 + 20 * SEC);
+    c.close();
+}
+
+#[test]
+fn failed_factory_record_keeps_reported_false() {
+    let mut c = released();
+    set_with_result(me(), T0 + 12 * SEC, PromiseResult::Failed);
+    c.on_reported();
+    assert!(!c.get_clause().reported);
+}
+
+#[test]
+fn close_after_record_deletes_the_account() {
+    let mut c = released();
+    set_with_result(me(), T0 + 12 * SEC, PromiseResult::Successful(vec![]));
+    c.on_reported();
+    assert!(c.get_clause().reported);
+    set(acc("anyone.near"), T0 + 20 * SEC);
+    c.close();
+    assert!(c.get_clause().settling);
+    set_with_result(me(), T0 + 21 * SEC, PromiseResult::Successful(b"true".to_vec()));
+    let r = c.on_unregistered();
+    assert!(matches!(r, PromiseOrValue::Promise(_)));
+    assert!(events().contains(&"clause_closed".to_string()));
+}
+
+#[test]
+fn close_with_tokens_left_fails_and_can_retry() {
+    let mut c = released();
+    set_with_result(me(), T0 + 12 * SEC, PromiseResult::Successful(vec![]));
+    c.on_reported();
+    set(acc("anyone.near"), T0 + 20 * SEC);
+    c.close();
+    set_with_result(me(), T0 + 21 * SEC, PromiseResult::Failed);
+    let r = c.on_unregistered();
+    assert!(matches!(r, PromiseOrValue::Value(false)));
+    assert!(!c.get_clause().settling);
+    assert!(events().contains(&"clause_close_failed".to_string()));
+    set(acc("anyone.near"), T0 + 30 * SEC);
+    c.close();
+}
+
+#[test]
+#[should_panic(expected = "SETTLING")]
+fn close_twice_at_once_fails() {
+    let mut c = released();
+    set_with_result(me(), T0 + 12 * SEC, PromiseResult::Successful(vec![]));
+    c.on_reported();
+    set(acc("anyone.near"), T0 + 20 * SEC);
+    c.close();
+    c.close();
+}

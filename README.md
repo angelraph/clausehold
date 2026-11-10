@@ -50,6 +50,8 @@ A real run from the website with a browser wallet, clause [`r-2.clausehold.testn
 | buyer's wallet sends 2 mUSD with `ft_transfer_call`; the clause keeps it and turns Funded | [`14EjWX8W…`](https://testnet.nearblocks.io/txns/14EjWX8WLB5tJd3NrzMVAXgwc2GSexV9cDL2xz6pkiYK) |
 | the payee's key signs `submit_delivery` as a meta-transaction, the desk relays it, the clause pays the payee and reports to the factory, all in one transaction | [`HxM4eEim…`](https://testnet.nearblocks.io/txns/HxM4eEimA3NKVw9JBtDqfvDQEhGkhUdFnqiKdxW4vKer) |
 
+Clause `r-3` went the same way and was then closed: the account deleted itself and its 1.99 NEAR of storage went back to the buyer in [`2smpAzwS…`](https://testnet.nearblocks.io/txns/2smpAzwSx89XfeesJdrbriXEjFQzCyH8PkLNBhfbf9tN). Its receipt now comes from the factory's record.
+
 And one that ran out of time, clause [`r-0`](https://testnet.nearblocks.io/address/r-0.clausehold.testnet): after its deadline anyone may call `expire`, and the 2 mUSD went back to the buyer in [`Eu2Kpjyg…`](https://testnet.nearblocks.io/txns/Eu2KpjygiTzDFsBCeuxhEmMtTkuJ3K43uuAkunnXi72p).
 
 ## Why NEAR
@@ -156,7 +158,7 @@ The full threat model, with the test behind each control and the known weaknesse
 
 ## Honest limits
 
-- Writing a clause stores a small contract on chain, which locks about 1.97 NEAR from the buyer per clause. That is fine on testnet and too much for mainnet. We are cutting it before the mainnet launch.
+- Writing a clause stores a small contract on chain, which needs about 1.97 NEAR from the buyer while the clause runs. It is a deposit, not a fee: once the clause settles, anyone can close it, and the account deletes itself and sends that NEAR back to the buyer. The buyer still needs the 2 NEAR up front.
 - Funding through NEAR Intents is mainnet only, because 1Click has no testnet. On testnet, clauses are funded directly with mUSD.
 - The testnet DAO has a single council member, so one vote passes a proposal. That proves the wiring; a real treasury would add its members and raise the threshold.
 

@@ -167,7 +167,23 @@ async function main() {
   console.log(`   payee ${Number(payeeBefore) / 1e6} -> ${Number(payeeAfter) / 1e6} mUSD`);
   console.log(`   explorer https://testnet.nearblocks.io/address/${clause}`);
   if (payeeAfter - payeeBefore !== BASE) throw new Error("The payee did not receive the clause amount");
-  console.log("\nPassed: written, funded, delivered without gas, released.");
+
+  step(6, "Close the clause and get its storage NEAR back");
+  const view = (await provider.callFunction({ contractId: clause, method: "get_clause", args: {} })) as { reported?: boolean };
+  if (view.reported === undefined) {
+    console.log("   this clause was written with code that has no close; skipping");
+  } else {
+    if (!view.reported) throw new Error("The factory has not recorded the outcome yet");
+    const held = BigInt((await provider.viewAccount({ accountId: clause })).amount);
+    const buyerBefore = BigInt((await provider.viewAccount({ accountId: BUYER })).amount);
+    const closed = await buyer.callFunctionRaw({ contractId: clause, methodName: "close", args: {}, gas: 100_000_000_000_000n });
+    const gone = await provider.viewAccount({ accountId: clause }).then(() => false).catch(() => true);
+    const buyerAfter = BigInt((await provider.viewAccount({ accountId: BUYER })).amount);
+    console.log(`   tx ${closed.transaction.hash}`);
+    console.log(`   clause held ${Number(held / 10n ** 20n) / 1e4} NEAR; buyer +${Number((buyerAfter - buyerBefore) / 10n ** 20n) / 1e4} NEAR after the fee`);
+    if (!gone) throw new Error("The clause account still exists after close");
+  }
+  console.log("\nPassed: written, funded, delivered without gas, released, closed.");
 }
 
 main().catch((err) => {

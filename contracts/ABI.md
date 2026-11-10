@@ -76,10 +76,11 @@ Keys: exactly one, a FunctionCall key `worker_pk`, receiver `r-<n>`, method_name
 | `expire` | `{}` | 0 | 150 Tgas | anyone | `open`/`funded` and `now ≥ deadline` → whole balance to buyer |
 | `freeze` | `{}` | 0 | 30 Tgas | buyer | `delivered`, inside window, cosigner set → `frozen` |
 | `cosign` | `{decision: "release" \| "return"}` | 0 | 150 Tgas | buyer or mandate cosigner | when both votes match, runs it; calling again retries a failed payout |
-| `report_outcome` | `{}` | 0 | 30 Tgas | anyone | re-sends the terminal outcome to the factory (idempotent) |
+| `report_outcome` | `{}` | 0 | 30 Tgas | anyone | re-sends the terminal outcome to the factory (idempotent); sets `reported` when the factory accepts it |
+| `close` | `{}` | 0 | 100 Tgas | anyone | `released`/`returned`, not settling, `reported` → FT `storage_unregister({force: false})` (fails while any token balance is left; run `sync_funding` first) → deletes the account, sending all its NEAR to `buyer`. Returns `false` if the unregister failed |
 | `on_*` | callbacks | | | private | |
 
-Panics: `ONLY_FACTORY`, `WRONG_ASSET`, `ONLY_WORKER_KEY`, `NOT_FUNDED`, `SETTLING`, `DEADLINE_PASSED`, `EMPTY_HASH`, `NOT_DELIVERED`, `CHALLENGE_WINDOW_OPEN`, `NOT_EXPIRABLE`, `NOT_EXPIRED`, `ONLY_BUYER`, `NO_COSIGNER`, `CHALLENGE_WINDOW_CLOSED`, `NOT_FROZEN`, `ONLY_BUYER_OR_COSIGNER`, `NOT_TERMINAL`.
+Panics: `NOT_REPORTED`, `ONLY_FACTORY`, `WRONG_ASSET`, `ONLY_WORKER_KEY`, `NOT_FUNDED`, `SETTLING`, `DEADLINE_PASSED`, `EMPTY_HASH`, `NOT_DELIVERED`, `CHALLENGE_WINDOW_OPEN`, `NOT_EXPIRABLE`, `NOT_EXPIRED`, `ONLY_BUYER`, `NO_COSIGNER`, `CHALLENGE_WINDOW_CLOSED`, `NOT_FROZEN`, `ONLY_BUYER_OR_COSIGNER`, `NOT_TERMINAL`.
 
 Payout chain (release/expire/cosign/sweep): `storage_deposit(to)` → callback → `ft_transfer(to)` → callback that sets the state and calls `factory.record_outcome`. A failure emits `clause_settle_failed` and leaves the state unchanged, with `settling = false`, so it can be retried.
 
@@ -95,7 +96,7 @@ ClauseView = { id: number, account_id: string, factory: string, buyer: string, p
   challenge_secs: number, cosigner: string | null, state: State, known_balance: string,
   delivered_at: number | null, delivery_hash: string | null, note_hash: string | null,
   buyer_vote: "release" | "return" | null, cosigner_vote: "release" | "return" | null,
-  settling: boolean, paid: string }
+  settling: boolean, paid: string, reported: boolean }
 ```
 `known_balance` is the last balance seen by `ft_on_transfer`/`sync_funding`. For truth, read `ft_balance_of` on the FT.
 
