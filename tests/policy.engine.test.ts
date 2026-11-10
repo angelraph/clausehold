@@ -106,6 +106,22 @@ describe("evaluateClause", () => {
     expect(violated(v)).toEqual(["perPayeeDailyCap"]);
   });
 
+  it("stops counting a clause that expired unwritten, or was returned, like the factory's reservation", () => {
+    const past = new Date(NOW.getTime() - 60_000).toISOString();
+    const expiredUnwritten = clause({ amount: 14, deadline: past });
+    const returnedOne = clause({ amount: 14 });
+    const entries = [
+      released("editor.testnet"),
+      cleared(expiredUnwritten),
+      cleared(returnedOne),
+      entry("CLAUSE_CREATED", { proposalId: returnedOne.id, clauseAccountId: "r-9.clausehold.testnet" }),
+      entry("CLAUSE_RETURNED", { clauseAccountId: "r-9.clausehold.testnet" }),
+      cleared(clause({ amount: 14 })),
+    ];
+    // Only the last 14 still counts, so 14 + 14 more is within the 30 per-payee cap.
+    expect(evaluateClause(clause({ amount: 14 }), mandate, { now: NOW, entries }).decision).toBe("PASS");
+  });
+
   it("does not count yesterday's clauses", () => {
     const yesterday = new Date(NOW.getTime() - 24 * 3_600_000).toISOString();
     const entries = [released("editor.testnet"), cleared(clause({ amount: 14 }), yesterday), cleared(clause({ amount: 14 }), yesterday)];

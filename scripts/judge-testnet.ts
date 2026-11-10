@@ -82,7 +82,7 @@ async function main() {
     ? ok(`12 for ${NEW_PAYEE} (${fresh.released} released) is refused by newPayeeCeiling`, newcomer.reasons.find((r) => r.rule === "newPayeeCeiling")?.detail)
     : bad("12 for a new payee is refused", `got ${newcomer.decision}`);
   const proven = await checkPayee(WORKER, env);
-  const earned = await openJob({ buyer: BUYER, payee: WORKER, amount: 12, terms: "judge: earned standing lifts the ceiling", agentId: "judge" }, env);
+  const earned = await openJob({ buyer: BUYER, payee: WORKER, amount: 12, terms: "judge: earned standing lifts the ceiling", minutes: 1, agentId: "judge" }, env);
   earned.decision === "PASS"
     ? ok(`the same 12 for ${WORKER} (${proven.released} released) passes: limits are earned`, earned.reasons.find((r) => r.rule === "newPayeeCeiling")?.detail)
     : bad("12 for a proven payee passes", `got ${earned.decision}`);

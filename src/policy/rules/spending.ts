@@ -6,7 +6,9 @@ import type { AuditEntry } from "../../audit/log.js";
  * Rules that depend on what has already been committed. They read the audit
  * log rather than keep counters, so they cannot drift from the record. A
  * clause counts once it is CLAUSE_CLEARED: from then on it may be written
- * and funded, so its value is spoken for.
+ * and funded, so its value is spoken for. It stops counting the way the
+ * factory's reservation does: when it was returned to the buyer, or when its
+ * deadline passed before anyone wrote it on chain (it can never be written now).
  */
 
 interface Committed {
@@ -16,11 +18,25 @@ interface Committed {
   amount: number;
 }
 
-export function committedClauses(entries: AuditEntry[]): Committed[] {
+export function committedClauses(entries: AuditEntry[], now: Date = new Date()): Committed[] {
+  const written = new Map<string, string>();
+  const returned = new Set<string>();
+  for (const e of entries) {
+    if (e.type === "CLAUSE_CREATED") {
+      const p = e.payload as { proposalId?: string; clauseAccountId?: string };
+      if (p.proposalId && p.clauseAccountId) written.set(p.proposalId, p.clauseAccountId);
+    } else if (e.type === "CLAUSE_RETURNED") {
+      const account = (e.payload as { clauseAccountId?: string }).clauseAccountId;
+      if (account) returned.add(account);
+    }
+  }
   const out: Committed[] = [];
   for (const e of entries) {
     if (e.type !== "CLAUSE_CLEARED") continue;
     const p = (e.payload as { proposal: ClauseProposal }).proposal;
+    const account = written.get(p.id);
+    if (!account && new Date(p.deadline).getTime() <= now.getTime()) continue;
+    if (account && returned.has(account)) continue;
     out.push({ at: new Date(e.timestamp).getTime(), agentId: p.agentId, payee: p.payee, amount: p.amount });
   }
   return out;
@@ -58,7 +74,7 @@ export function checkMaxPerClause(proposal: ClauseProposal, mandate: Mandate): R
 export function checkDailySpendCap(proposal: ClauseProposal, mandate: Mandate, entries: AuditEntry[], now: Date): RuleResult {
   const cap = mandate.limits.dailySpendCap;
   const dayStart = startOfUtcDay(now);
-  const spent = committedClauses(entries)
+  const spent = committedClauses(entries, now)
     .filter((c) => c.at >= dayStart)
     .reduce((sum, c) => sum + c.amount, 0);
   const projected = spent + proposal.amount;
@@ -75,7 +91,7 @@ export function checkDailySpendCap(proposal: ClauseProposal, mandate: Mandate, e
 export function checkPerPayeeDailyCap(proposal: ClauseProposal, mandate: Mandate, entries: AuditEntry[], now: Date): RuleResult {
   const cap = mandate.limits.perPayeeDailyCap;
   const dayStart = startOfUtcDay(now);
-  const spent = committedClauses(entries)
+  const spent = committedClauses(entries, now)
     .filter((c) => c.payee === proposal.payee && c.at >= dayStart)
     .reduce((sum, c) => sum + c.amount, 0);
   const projected = spent + proposal.amount;
@@ -115,7 +131,7 @@ export function checkClauseRate(proposal: ClauseProposal, mandate: Mandate, entr
   const max = mandate.limits.maxClausesPerHour;
   if (max === undefined) return { rule: "maxClausesPerHour", outcome: "ok", detail: "No clause-rate limit configured" };
   const since = now.getTime() - 3_600_000;
-  const recent = committedClauses(entries).filter((c) => c.agentId === proposal.agentId && c.at >= since).length;
+  const recent = committedClauses(entries, now).filter((c) => c.agentId === proposal.agentId && c.at >= since).length;
   if (recent >= max) {
     return {
       rule: "maxClausesPerHour",
