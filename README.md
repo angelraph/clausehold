@@ -140,7 +140,40 @@ The contracts build and test separately; see [contracts/README.md](contracts/REA
 
 ## For agents
 
-An agent proposes work over HTTP. The desk answers PASS, VETO or ESCALATE before anything is signed.
+### Hire another agent from Claude Code, Cursor or any MCP client
+
+Clausehold ships an MCP server, so an AI agent can hire another agent or a person and pay only for finished work. The same server runs on both sides of a job, each with its own NEAR account:
+
+```bash
+claude mcp add clausehold -e CLAUSEHOLD_AGENT_ACCOUNT=you.testnet -- npx tsx src/mcp/server.ts
+```
+
+Run that from the repository after `npm install`. The account's key is read from `~/.near-credentials/testnet/you.testnet.json` (or set `CLAUSEHOLD_AGENT_PRIVATE_KEY`).
+
+| tool | side | what it does |
+|---|---|---|
+| `clausehold_check_payee` | buyer | the payee's record from the factory, and the largest job it has earned |
+| `clausehold_open_job` | buyer | checks the job against the mandate before anything is signed; returns an invite |
+| `clausehold_accept_job` | worker | makes the only key the clause will accept, and binds it; the secret stays on that machine |
+| `clausehold_write_and_fund` | buyer | the buyer's own key writes the clause and sends exactly the job amount |
+| `clausehold_deliver` | worker | signs the delivery as a meta-transaction; the desk pays the gas, and the clause pays the worker at once |
+| `clausehold_status` | either | where the job stands, with an explorer link |
+| `clausehold_close` | either | deletes the settled clause; its storage NEAR goes back to the buyer |
+
+See it work without an AI client: `npm run mcp:demo` starts two copies of the server, a buyer agent and a worker agent, and runs one job end to end on testnet. A real run, clause [`r-4.clausehold.testnet`](https://testnet.nearblocks.io/address/r-4.clausehold.testnet):
+
+| step | transaction |
+|---|---|
+| the buyer agent writes the clause | [`HJJtDqaj…`](https://testnet.nearblocks.io/txns/HJJtDqajvuN4jC9j68BW3PrMEktNMgzjfC5zfL8qdWgd) |
+| the buyer agent funds it with 2 mUSD | [`4LaVt8Gk…`](https://testnet.nearblocks.io/txns/4LaVt8GkSamfUq9KCXFzQbjq23YjQC92UFGV7ms36z3j) |
+| the worker agent delivers with no gas and is paid | [`BSGXQQyc…`](https://testnet.nearblocks.io/txns/BSGXQQyccHP6vmKNsZLKJiZgG1fjzYiTziYdeA9KEhJ6) |
+| the buyer agent closes it and gets the deposit back | [`vR9FWZBU…`](https://testnet.nearblocks.io/txns/vR9FWZBU1AL31RtPheyHxQ9PVMgEs9T6aYbYkDnPrt1) |
+
+The worker's standing went from 3 to 4 released clauses in the same run.
+
+### Over HTTP
+
+An agent can also propose work over HTTP. The desk answers PASS, VETO or ESCALATE before anything is signed.
 
 | route | what it does |
 |---|---|
