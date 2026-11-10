@@ -90,7 +90,50 @@ export async function readFactoryClause(network: NetworkProfile, account: string
 
 export const readClause = (network: NetworkProfile, account: string) => view<ClauseView>(network, account, "get_clause");
 
-export const readStanding = (network: NetworkProfile, account: string) => view<Standing>(network, network.factory, "standing", { account_id: account });
+/** Every receipt the factory has recorded, oldest first, read in pages of 100. */
+export async function readAllReceipts(network: NetworkProfile): Promise<ChainReceipt[]> {
+  const all: ChainReceipt[] = [];
+  for (let from = 0; from < 5000; from += 100) {
+    const page = await view<ChainReceipt[]>(network, network.factory, "get_receipts", { from_index: from, limit: 100 });
+    all.push(...page);
+    if (page.length < 100) break;
+  }
+  return all;
+}
+
+export interface LeaderRow {
+  payee: string;
+  released: number;
+  returned: number;
+  volume: bigint;
+  lastAt: number;
+}
+
+/** Payees ranked by released clauses, then by volume paid to them, then by most recent. */
+export function rankPayees(receipts: ChainReceipt[]): LeaderRow[] {
+  const rows = new Map<string, LeaderRow>();
+  for (const r of receipts) {
+    const row = rows.get(r.payee) ?? { payee: r.payee, released: 0, returned: 0, volume: 0n, lastAt: 0 };
+    if (r.outcome === "released") {
+      row.released += 1;
+      row.volume += BigInt(r.paid);
+    } else {
+      row.returned += 1;
+    }
+    row.lastAt = Math.max(row.lastAt, r.at);
+    rows.set(r.payee, row);
+  }
+  return [...rows.values()].sort((a, b) => b.released - a.released || (b.volume > a.volume ? 1 : b.volume < a.volume ? -1 : 0) || b.lastAt - a.lastAt);
+}
+
+/** Largest single clause this payee may be offered now: the factory lifts the new-payee ceiling after one release. */
+export function earnedLimit(standing: Standing, mandate: ChainMandate): { limit: string; lifted: boolean } {
+  if (standing.as_payee.released > 0) return { limit: mandate.max_per_clause, lifted: true };
+  const ceiling = BigInt(mandate.new_payee_ceiling) < BigInt(mandate.max_per_clause) ? mandate.new_payee_ceiling : mandate.max_per_clause;
+  return { limit: ceiling, lifted: false };
+}
+
+export const readStanding =(network: NetworkProfile, account: string) => view<Standing>(network, network.factory, "standing", { account_id: account });
 
 export const readReceipts = (network: NetworkProfile, account: string) =>
   view<ChainReceipt[]>(network, network.factory, "get_receipts", { account_id: account, limit: 100 });

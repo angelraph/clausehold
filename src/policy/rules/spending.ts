@@ -89,7 +89,14 @@ export function checkPerPayeeDailyCap(proposal: ClauseProposal, mandate: Mandate
   return { rule: "perPayeeDailyCap", outcome: "ok", detail: `${proposal.payee} would be at ${fmt(projected)} of ${fmt(cap)} today` };
 }
 
-export function checkNewPayeeCeiling(proposal: ClauseProposal, mandate: Mandate, entries: AuditEntry[]): RuleResult {
+export function checkNewPayeeCeiling(proposal: ClauseProposal, mandate: Mandate, entries: AuditEntry[], chainReleases?: number | null): RuleResult {
+  if (chainReleases && chainReleases > 0) {
+    return {
+      rule: "newPayeeCeiling",
+      outcome: "ok",
+      detail: `${proposal.payee} has been paid through ${chainReleases} released ${chainReleases === 1 ? "clause" : "clauses"} on chain, so the new-payee ceiling no longer applies`,
+    };
+  }
   if (payeesWithRelease(entries).has(proposal.payee)) {
     return { rule: "newPayeeCeiling", outcome: "ok", detail: `${proposal.payee} has delivered before` };
   }

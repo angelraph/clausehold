@@ -26,6 +26,8 @@ const ConfigSchema = z.object({
    * on chain. Hosted desks use "wallet", so the desk never spends for strangers.
    */
   clauseWriter: z.enum(["server", "wallet"]),
+  /** Read each payee's earned standing from the factory before checking a clause. Off in tests. */
+  chainStanding: z.boolean(),
   /** NEAR Intents 1Click partner key. Optional: without it 1Click adds a 0.25% fee. */
   intentsApiKey: z.string().optional(),
   /** Browser origins allowed to call the API, e.g. the deployed web app. */
@@ -66,6 +68,7 @@ function loadConfig(): Config {
       privateKey: process.env.CLAUSEHOLD_RELAYER_PRIVATE_KEY || undefined,
     },
     clauseWriter: process.env.CLAUSEHOLD_CLAUSE_WRITER === "wallet" ? "wallet" : "server",
+    chainStanding: process.env.CLAUSEHOLD_CHAIN_STANDING !== "off",
     intentsApiKey: process.env.NEAR_INTENTS_API_KEY || undefined,
     webOrigins: (process.env.CLAUSEHOLD_WEB_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173").split(",").map((o) => o.trim()).filter(Boolean),
     apiPort: process.env.CLAUSEHOLD_API_PORT ?? 4477,
