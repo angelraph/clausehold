@@ -31,7 +31,7 @@ const MANDATE = "b2f1e9a0-1a2b-4c3d-8e4f-000000000001";
 const AMOUNT = 2;
 const BASE = BigInt(AMOUNT) * 1_000_000n;
 
-const provider = new JsonRpcProvider({ url: "https://rpc.testnet.near.org" });
+const provider = new JsonRpcProvider({ url: "https://test.rpc.fastnear.com" });
 
 function step(n: number, text: string) {
   console.log(`\n${n}. ${text}`);

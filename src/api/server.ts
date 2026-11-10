@@ -38,7 +38,7 @@ import { deriveDesk, type DeskClause } from "../desk/view.js";
 import { isTerminal, syncClauseFromChain } from "../desk/chainSync.js";
 import type { ChainCaller, ChainReader } from "../near/chain.js";
 import { OneClickError, assertQuoteFundsClause, buildClauseFundingQuote, findToken, type OneClickClient } from "../near/intents.js";
-import { RelayRefusedError, type RelayResult } from "../near/relayer.js";
+import { DeliveryRefusedError, RelayRefusedError, type RelayResult } from "../near/relayer.js";
 import { assetFor, networkProfile, toBaseUnits } from "../near/network.js";
 import { viewCall } from "../near/rpc.js";
 import { readStanding } from "../near/standing.js";
@@ -723,6 +723,10 @@ export function createApp(deps: ApiDeps = {}): express.Express {
     } catch (err) {
       if (err instanceof RelayRefusedError) {
         res.status(422).json({ error: err.message });
+        return;
+      }
+      if (err instanceof DeliveryRefusedError) {
+        res.status(422).json({ error: err.message, txHash: err.txHash });
         return;
       }
       res.status(502).json({ error: err instanceof Error ? err.message : String(err) });

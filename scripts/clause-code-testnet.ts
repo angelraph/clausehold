@@ -36,7 +36,7 @@ const NEAR = 10n ** 24n;
 const BYTE_COST = 10n ** 19n;
 const TGAS = 10n ** 12n;
 
-const provider = new JsonRpcProvider({ url: "https://rpc.testnet.near.org" });
+const provider = new JsonRpcProvider({ url: "https://test.rpc.fastnear.com" });
 
 function signer(accountId: string): Account {
   const file = join(homedir(), ".near-credentials", "testnet", `${accountId}.json`);

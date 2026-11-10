@@ -12,6 +12,7 @@
     "clause-code:testnet": "tsx scripts/clause-code-testnet.ts",
     "mcp": "tsx src/mcp/server.ts",
     "mcp:demo": "tsx scripts/mcp-demo.ts",
+    "judge": "tsx scripts/judge-testnet.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build": "tsc"
