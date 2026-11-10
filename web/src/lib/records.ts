@@ -66,7 +66,29 @@ export const readFactoryOwner = (network: NetworkProfile) => view<string>(networ
 
 export const readFactoryMandate = (network: NetworkProfile) => view<ChainMandate | null>(network, network.factory, "get_mandate");
 
-export const readClause =(network: NetworkProfile, account: string) => view<ClauseView>(network, account, "get_clause");
+/** The factory's own record of a clause, which outlives the clause account. */
+export interface FactoryClause {
+  id: number;
+  account_id: string;
+  buyer: string;
+  payee: string;
+  worker_pk: string;
+  asset: string;
+  amount: string;
+  deadline: number;
+  terms_hash: string;
+  challenge_secs: number;
+  status: "pending" | "live" | "released" | "returned" | "failed";
+}
+
+/** Reads `get_clause({id})` on the factory for an account named `r-<id>.<factory>`. */
+export async function readFactoryClause(network: NetworkProfile, account: string): Promise<FactoryClause | null> {
+  const m = /^r-(\d+)\./.exec(account);
+  if (!m || !account.endsWith(`.${network.factory}`)) return null;
+  return view<FactoryClause | null>(network, network.factory, "get_clause", { id: Number(m[1]) });
+}
+
+export const readClause = (network: NetworkProfile, account: string) => view<ClauseView>(network, account, "get_clause");
 
 export const readStanding = (network: NetworkProfile, account: string) => view<Standing>(network, network.factory, "standing", { account_id: account });
 

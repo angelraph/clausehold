@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { PageHead } from "../components/Page";
 import { StatusChip } from "../components/Status";
 import { explorerAccount, useNetwork } from "../lib/network";
-import { chainTime, readClause, tokenAmount, tokenSymbol, type ClauseView } from "../lib/records";
+import { chainTime, readClause, readFactoryClause, tokenAmount, tokenSymbol, type ClauseView, type FactoryClause } from "../lib/records";
 
 /**
  * A public receipt, read straight from the clause account on chain. Nothing
@@ -14,11 +14,20 @@ export default function Receipt() {
   const { network } = useNetwork();
   const [c, setC] = useState<ClauseView | null>(null);
   const [missing, setMissing] = useState(false);
+  const [closed, setClosed] = useState<FactoryClause | null>(null);
 
   useEffect(() => {
     setC(null);
     setMissing(false);
-    readClause(network, clause).then(setC).catch(() => setMissing(true));
+    setClosed(null);
+    readClause(network, clause)
+      .then(setC)
+      .catch(async () => {
+        // A closed clause has no account any more; the factory still has its record.
+        const record = await readFactoryClause(network, clause).catch(() => null);
+        if (record && (record.status === "released" || record.status === "returned")) setClosed(record);
+        else setMissing(true);
+      });
   }, [network, clause]);
 
   const symbol = c ? tokenSymbol(network, c.asset) : "";
@@ -34,7 +43,25 @@ export default function Receipt() {
               There is no clause at <span className="mono">{clause}</span> on {network.label}. If it was written on the other network, switch at the top.
             </div>
           )}
-          {!c && !missing && <p className="faint" style={{ margin: 0 }}>Reading the clause from the chain</p>}
+          {closed && (
+            <>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <StatusChip status={closed.status === "released" ? "released" : "returned"} />
+                <span className="mono" style={{ fontSize: 20 }}>{tokenAmount(closed.amount)} {tokenSymbol(network, closed.asset)}</span>
+              </div>
+              <p className="muted" style={{ fontSize: 15, marginTop: 14 }}>
+                {closed.status === "released" ? <>Paid to <span className="mono">{closed.payee}</span> after delivery.</> : <>Nothing was delivered in time, so the money went back to <span className="mono">{closed.buyer}</span>.</>}{" "}
+                The clause account has since been closed and its storage NEAR returned to the buyer, so this is the factory's record of it.
+              </p>
+              <dl className="kv" style={{ marginTop: 8 }}>
+                <dt>Paid by</dt><dd className="mono"><Link to={`/s/${closed.buyer}`}>{closed.buyer}</Link></dd>
+                <dt>Paid to</dt><dd className="mono"><Link to={`/s/${closed.payee}`}>{closed.payee}</Link></dd>
+                <dt>Deadline</dt><dd>{chainTime(closed.deadline)}</dd>
+                <dt>Terms hash</dt><dd className="mono" style={{ wordBreak: "break-all", fontSize: 12.5 }}>{closed.terms_hash}</dd>
+              </dl>
+            </>
+          )}
+          {!c && !missing && !closed && <p className="faint" style={{ margin: 0 }}>Reading the clause from the chain</p>}
           {c && (
             <>
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
@@ -66,7 +93,7 @@ export default function Receipt() {
         <div className="card card-pad">
           <h2 className="h3">Check it yourself</h2>
           <p className="muted" style={{ fontSize: 15 }}>
-            Everything on this page is read from the clause account itself. Every step also logged a public event, so the explorer shows the same story, transaction by transaction.
+            {closed ? "This record is read from the factory contract, which keeps every clause it created." : "Everything on this page is read from the clause account itself."} Every step also logged a public event, so the explorer shows the same story, transaction by transaction.
           </p>
           <a className="btn btn-ghost btn-sm" href={explorerAccount(network, clause)} target="_blank" rel="noreferrer">Open in the explorer</a>
           {c && (

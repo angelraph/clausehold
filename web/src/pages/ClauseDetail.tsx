@@ -4,7 +4,7 @@ import { ApiDown, PageHead, deadlineNote, shortDate } from "../components/Page";
 import { StatusChip } from "../components/Status";
 import { WalletButton } from "../components/WalletButton";
 import { api, ApiError, statusOf, type DeskClause } from "../lib/api";
-import { tokenBalance, toBaseUnits6, view } from "../lib/chain";
+import { nearBalance, tokenBalance, toBaseUnits6, view } from "../lib/chain";
 import { assetLabel, explorerAccount, useNetwork, type NetworkProfile } from "../lib/network";
 import { useWallet } from "../lib/wallet";
 
@@ -180,7 +180,7 @@ function BuyerPanel({ row, status, onChange }: { row: DeskClause; status: Status
     body = (
       <div style={{ display: "grid", gap: 12 }}>
         <p className="muted" style={{ margin: 0 }}>
-          The payee accepted. Writing the clause creates its own account on chain, bound to their key. Your wallet pays about 2 NEAR to store that account and its code on chain, plus a small network fee.
+          The payee accepted. Writing the clause creates its own account on chain, bound to their key. Your wallet puts down about 2 NEAR to store that account and its code on chain, plus a small network fee. You get the 2 NEAR back when the clause settles and is closed.
         </p>
         {connect || notBuyer || (
           <button className="btn btn-primary" onClick={write} disabled={!!busy}>{busy === "write" ? "Waiting for your wallet" : "Write the clause"}</button>
@@ -237,9 +237,81 @@ function BuyerPanel({ row, status, onChange }: { row: DeskClause; status: Status
         </div>
       )}
       {msg && <div className={`notice ${msg.ok ? "notice-green" : "notice-red"}`}>{msg.text}</div>}
+      {row.clauseAccountId && (status === "released" || status === "returned") && <Reclaim account={row.clauseAccountId} buyer={p.buyer} />}
       {row.clauseAccountId && (
         <a className="link-arrow" style={{ fontSize: 14 }} href={explorerAccount(network, row.clauseAccountId)} target="_blank" rel="noreferrer">See the clause account on the explorer</a>
       )}
+    </div>
+  );
+}
+
+/**
+ * A settled clause still holds the NEAR that stored its code. Closing it
+ * deletes the account and sends that NEAR to the buyer. Anyone may do it;
+ * clauses written before `close` existed simply keep their account.
+ */
+function Reclaim({ account, buyer }: { account: string; buyer: string }) {
+  const { network } = useNetwork();
+  const w = useWallet();
+  const [state, setState] = useState<"loading" | "closed" | "old" | "waiting" | "open">("loading");
+  const [held, setHeld] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const check = useCallback(async () => {
+    const near = await nearBalance(network, account);
+    if (near === null) return setState("closed");
+    setHeld(near);
+    try {
+      const c = await view<{ reported?: boolean }>(network, account, "get_clause");
+      setState(c.reported === undefined ? "old" : c.reported ? "open" : "waiting");
+    } catch {
+      setState("old");
+    }
+  }, [network, account]);
+
+  useEffect(() => {
+    check();
+  }, [check]);
+
+  async function close() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await w.call({ receiverId: account, methodName: "close", args: {}, gas: "100000000000000", deposit: "0" });
+      if (r.value === false) {
+        // Leftover tokens block it. Sweep them to the buyer, then ask again.
+        await w.call({ receiverId: account, methodName: "sync_funding", args: {}, gas: "150000000000000", deposit: "0" });
+        setMsg({ ok: false, text: `The clause still held some tokens, so they were sent to ${buyer}. Close it again to finish.` });
+      } else {
+        setMsg({ ok: true, text: `Closed. About ${held?.toFixed(2) ?? "2"} NEAR went back to ${buyer}.` });
+      }
+      await check();
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (state === "loading" || state === "old") return null;
+  return (
+    <div style={{ display: "grid", gap: 8, borderTop: "1px solid var(--line)", paddingTop: 14 }}>
+      {state === "closed" && <p className="muted" style={{ margin: 0, fontSize: 14 }}>Closed. The NEAR that stored this clause went back to <span className="mono">{buyer}</span>. The receipt stays on the factory.</p>}
+      {state === "waiting" && <p className="muted" style={{ margin: 0, fontSize: 14 }}>Waiting for the factory to record the outcome. After that, the clause can be closed.</p>}
+      {state === "open" && (
+        <>
+          <p className="muted" style={{ margin: 0, fontSize: 14 }}>
+            The clause account still holds about {held?.toFixed(2)} NEAR that paid for its storage. Closing it sends that NEAR back to <span className="mono">{buyer}</span>. Anyone can close it; it costs a small network fee.
+          </p>
+          {w.accountId ? (
+            <button className="btn btn-ghost btn-sm" style={{ justifySelf: "start" }} onClick={close} disabled={busy}>{busy ? "Waiting for your wallet" : "Close it and return the NEAR"}</button>
+          ) : (
+            <WalletButton />
+          )}
+        </>
+      )}
+      {msg && <div className={`notice ${msg.ok ? "notice-green" : "notice-red"}`}>{msg.text}</div>}
     </div>
   );
 }

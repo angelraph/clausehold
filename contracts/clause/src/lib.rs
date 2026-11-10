@@ -12,6 +12,9 @@
 //! `Delivered -> Frozen -> (cosign) Released | Returned`.
 //! There is no withdraw method. Tokens leave only to the payee (release), to
 //! the buyer (return or sweep), or back to the sender (ft_on_transfer refund).
+//! After settling, `close` deletes the account and its NEAR goes to the buyer.
+//! It first leaves the token with `storage_unregister(force: false)`, which
+//! fails while any token balance is left, so no tokens can be stranded.
 
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
@@ -32,9 +35,11 @@ const GAS_FT_BALANCE: Gas = Gas::from_tgas(5);
 const GAS_FT_STORAGE: Gas = Gas::from_tgas(10);
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(15);
 const GAS_RECORD_OUTCOME: Gas = Gas::from_tgas(15);
-const GAS_ON_TRANSFERRED: Gas = Gas::from_tgas(25);
-const GAS_ON_REGISTERED: Gas = Gas::from_tgas(50);
-const GAS_ON_BALANCE: Gas = Gas::from_tgas(70);
+const GAS_ON_TRANSFERRED: Gas = Gas::from_tgas(30);
+const GAS_ON_REGISTERED: Gas = Gas::from_tgas(55);
+const GAS_ON_BALANCE: Gas = Gas::from_tgas(75);
+const GAS_ON_REPORTED: Gas = Gas::from_tgas(5);
+const GAS_ON_UNREGISTERED: Gas = Gas::from_tgas(10);
 
 const NS_PER_SEC: u64 = 1_000_000_000;
 
@@ -44,6 +49,7 @@ trait FungibleToken {
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
     fn ft_balance_of(&self, account_id: AccountId) -> U128;
     fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>);
+    fn storage_unregister(&mut self, force: Option<bool>) -> bool;
 }
 
 #[ext_contract(ext_factory)]
@@ -137,6 +143,8 @@ pub struct ClauseView {
     pub cosigner_vote: Option<Decision>,
     pub settling: bool,
     pub paid: U128,
+    /// The factory has recorded the outcome, so the clause may be closed.
+    pub reported: bool,
 }
 
 #[near(contract_state)]
@@ -165,6 +173,9 @@ pub struct Clause {
     settling: bool,
     /// Amount sent out by the terminal payout (release or return).
     paid: u128,
+    /// Set once the factory has recorded the outcome. `close` waits for it,
+    /// so standing is never lost when the account goes away.
+    reported: bool,
 }
 
 pub fn emit(event: &str, data: serde_json::Value) {
@@ -222,6 +233,7 @@ impl Clause {
             cosigner_vote: None,
             settling: false,
             paid: 0,
+            reported: false,
         };
         emit(
             "clause_open",
@@ -255,6 +267,7 @@ impl Clause {
             cosigner_vote: self.cosigner_vote,
             settling: self.settling,
             paid: U128(self.paid),
+            reported: self.reported,
         }
     }
 
@@ -447,7 +460,51 @@ impl Clause {
         self.record_outcome(outcome)
     }
 
+    /// Anyone may call once the clause is settled and the factory has recorded
+    /// it. The clause leaves the token (which fails while it still holds any,
+    /// so run `sync_funding` first to sweep leftovers to the buyer), then
+    /// deletes its own account. The NEAR that stored it goes back to the buyer.
+    pub fn close(&mut self) -> Promise {
+        require!(self.state.is_terminal(), "NOT_TERMINAL");
+        require!(!self.settling, "SETTLING");
+        require!(self.reported, "NOT_REPORTED");
+        self.settling = true;
+        ext_ft::ext(self.asset.clone())
+            .with_static_gas(GAS_FT_STORAGE)
+            .with_attached_deposit(ONE_YOCTO)
+            .storage_unregister(Some(false))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_ON_UNREGISTERED)
+                    .on_unregistered(),
+            )
+    }
+
     // ------------------------------------------------------------ callbacks
+
+    #[private]
+    pub fn on_reported(&mut self) {
+        if previous_ok() {
+            self.reported = true;
+        }
+    }
+
+    #[private]
+    pub fn on_unregistered(&mut self) -> PromiseOrValue<bool> {
+        if !previous_ok() {
+            self.settling = false;
+            emit(
+                "clause_close_failed",
+                json!({ "clause_id": self.id, "step": "storage_unregister" }),
+            );
+            return PromiseOrValue::Value(false);
+        }
+        emit(
+            "clause_closed",
+            json!({ "clause_id": self.id, "refund_to": self.buyer }),
+        );
+        PromiseOrValue::Promise(Promise::new(env::current_account_id()).delete_account(self.buyer.clone()))
+    }
 
     #[private]
     pub fn on_return_balance(
@@ -586,6 +643,11 @@ impl Clause {
         ext_factory::ext(self.factory.clone())
             .with_static_gas(GAS_RECORD_OUTCOME)
             .record_outcome(self.id, outcome, U128(self.paid))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_ON_REPORTED)
+                    .on_reported(),
+            )
     }
 }
 

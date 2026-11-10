@@ -22,6 +22,7 @@ Rust, near-sdk 5.30. One cargo workspace:
 4. `release()` (anyone, after the window) and `expire()` (anyone, after the deadline, if not delivered) run `storage_deposit` → callback → `ft_transfer` → callback. The state changes only in the last callback, which also calls `factory.record_outcome`. A failure anywhere unlocks the clause and leaves it retryable.
 5. `freeze()` (buyer, inside the window) then `cosign(decision)` from both the buyer and the mandate co-signer. Matching votes run the decision; calling `cosign` again retries a failed payout.
 6. In `Released` or `Returned`, `sync_funding()` sweeps any balance (late or excess deposits) to the buyer.
+7. Once settled and recorded by the factory, `close()` (anyone) unregisters the clause from the token, which fails while any balance is left, then deletes the account and sends its NEAR (the storage deposit, about 1.95 NEAR) to the buyer. The factory keeps the clause's record and receipt.
 
 There is no withdraw method. Tokens leave a clause only to the payee (release), to the buyer (return or sweep), or back to the sender (`ft_on_transfer` refund).
 

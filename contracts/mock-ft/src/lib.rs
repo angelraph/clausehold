@@ -184,6 +184,23 @@ impl MockFt {
         StorageBalance { total: U128(STORAGE_MIN.as_yoctonear()), available: U128(0) }
     }
 
+    /// NEP-145. Removes the caller's registration and refunds its storage
+    /// deposit. With a balance left it panics unless `force` is true, in which
+    /// case the balance is burned. Returns false if the caller was not registered.
+    #[payable]
+    pub fn storage_unregister(&mut self, force: Option<bool>) -> bool {
+        require!(env::attached_deposit() == NearToken::from_yoctonear(1), "REQUIRES_ONE_YOCTO");
+        let who = env::predecessor_account_id();
+        let Some(balance) = self.balances.get(&who).copied() else {
+            return false;
+        };
+        require!(balance == 0 || force == Some(true), "BALANCE_NOT_ZERO");
+        self.balances.remove(&who);
+        self.total_supply -= balance;
+        Promise::new(who).transfer(STORAGE_MIN).detach();
+        true
+    }
+
     pub fn storage_balance_of(&self, account_id: AccountId) -> Option<StorageBalance> {
         self.balances
             .contains_key(&account_id)
