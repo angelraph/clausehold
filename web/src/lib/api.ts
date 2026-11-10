@@ -103,6 +103,17 @@ export interface ClauseProposal {
   submittedAt: string;
 }
 
+export type AcceptanceCheck =
+  | { kind: "url_contains"; url: string; text: string }
+  | { kind: "github_pr_merged"; repo: string; pr: number }
+  | { kind: "sha256"; value: string };
+
+export interface CheckVerdict {
+  passed: boolean;
+  detail: string;
+  checkedAt: string;
+}
+
 export interface InviteView {
   inviteId: string;
   status: "awaiting_key" | "key_bound" | "written";
@@ -118,6 +129,9 @@ export interface InviteView {
   keySource: "passkey-prf" | "browser-random" | null;
   clauseAccountId: string | null;
   createTxHash: string | null;
+  /** The buyer's acceptance check, if any, and the last time it ran on a delivery. */
+  check?: (AcceptanceCheck & { description: string }) | null;
+  lastCheck?: CheckVerdict | null;
   /** The clause's last state seen on chain, e.g. CLAUSE_FUNDED. */
   chainStatus?: string | null;
 }
@@ -173,6 +187,7 @@ export const api = {
     call<{ invite: InviteView }>(`/invites/${encodeURIComponent(inviteId)}/written`, { method: "POST", body: JSON.stringify({ clauseAccountId, txHash }) }),
   openInvite: (body: Record<string, unknown>) => call<OpenInviteResult>("/invites", { method: "POST", body: JSON.stringify(body), auth: true }),
   invite: (id: string) => call<InviteView>(`/invites/${encodeURIComponent(id)}`),
+  runCheck: (id: string, hash?: string) => call<{ check: string; verdict: CheckVerdict }>(`/invites/${encodeURIComponent(id)}/check`, { method: "POST", body: JSON.stringify(hash ? { hash } : {}) }),
   bindKey: (id: string, publicKey: string, keySource: string) =>
     call<{ invite: InviteView; pendingReason: string | null }>(`/invites/${encodeURIComponent(id)}/key`, { method: "POST", body: JSON.stringify({ publicKey, keySource }) }),
   mandate: (id: string) => call<MandateView>(`/mandate?id=${encodeURIComponent(id)}`),

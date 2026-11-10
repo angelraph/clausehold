@@ -4,6 +4,7 @@ import { auditLog, type AuditEntry } from "../audit/log.js";
 import { config } from "../config.js";
 import type { ClauseProposal } from "../policy/types.js";
 import { hashTerms, type ClauseWriter } from "../near/clauseWriter.js";
+import { describeCheck, type AcceptanceCheck, type CheckVerdict } from "../verify/checks.js";
 
 /**
  * An invite is how the editor's key exists before the clause does.
@@ -34,6 +35,9 @@ export interface InviteRecord {
   clauseAccountId?: string;
   createTxHash?: string;
   cleared: boolean;
+  /** The buyer's acceptance check, run against every delivery before it is relayed. */
+  check?: AcceptanceCheck;
+  lastCheck?: CheckVerdict;
 }
 
 export class InviteNotFoundError extends Error {
@@ -62,8 +66,8 @@ export function deriveInvites(entries: AuditEntry[]): Map<string, InviteRecord> 
       const inv = byProposal.get(id);
       if (inv) inv.cleared = true;
     } else if (e.type === "INVITE_OPENED") {
-      const p = e.payload as { inviteId: string; proposal: ClauseProposal };
-      const rec: InviteRecord = { inviteId: p.inviteId, proposal: p.proposal, openedAt: e.timestamp, status: "awaiting_key", cleared: clearedProposals.has(p.proposal.id) };
+      const p = e.payload as { inviteId: string; proposal: ClauseProposal; check?: AcceptanceCheck };
+      const rec: InviteRecord = { inviteId: p.inviteId, proposal: p.proposal, openedAt: e.timestamp, status: "awaiting_key", cleared: clearedProposals.has(p.proposal.id), check: p.check };
       invites.set(p.inviteId, rec);
       byProposal.set(p.proposal.id, rec);
     } else if (e.type === "INVITE_KEY_BOUND") {
@@ -74,6 +78,10 @@ export function deriveInvites(entries: AuditEntry[]): Map<string, InviteRecord> 
         rec.publicKey = p.publicKey;
         rec.keySource = p.keySource;
       }
+    } else if (e.type === "DELIVERY_CHECKED") {
+      const p = e.payload as { inviteId: string; verdict: CheckVerdict };
+      const rec = invites.get(p.inviteId);
+      if (rec) rec.lastCheck = p.verdict;
     } else if (e.type === "CLAUSE_CREATED") {
       const p = e.payload as { proposalId: string; clauseAccountId: string; txHash: string };
       const rec = byProposal.get(p.proposalId);
@@ -87,9 +95,9 @@ export function deriveInvites(entries: AuditEntry[]): Map<string, InviteRecord> 
   return invites;
 }
 
-export async function openInvite(proposal: ClauseProposal): Promise<{ inviteId: string }> {
+export async function openInvite(proposal: ClauseProposal, check?: AcceptanceCheck): Promise<{ inviteId: string }> {
   const inviteId = randomBytes(16).toString("base64url");
-  await auditLog.append("INVITE_OPENED", "n/a", { inviteId, proposal });
+  await auditLog.append("INVITE_OPENED", "n/a", check ? { inviteId, proposal, check } : { inviteId, proposal });
   return { inviteId };
 }
 
@@ -164,5 +172,7 @@ export function publicInviteView(rec: InviteRecord) {
     keySource: rec.keySource ?? null,
     clauseAccountId: rec.clauseAccountId ?? null,
     createTxHash: rec.createTxHash ?? null,
+    check: rec.check ? { ...rec.check, description: describeCheck(rec.check) } : null,
+    lastCheck: rec.lastCheck ?? null,
   };
 }

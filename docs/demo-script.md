@@ -44,7 +44,7 @@ Show **Paid**. Back on the clause page, click **Close it and return the NEAR**.
 
 **2:10 to 2:25. Proof.** Run `npm run judge` (or show a finished run) and scroll the PASS lines.
 
-> "One command runs every claim on testnet, including fourteen attempts to cheat: faking a delivery, taking the money back early, the worker key trying to move funds. Every one fails, with its reason code."
+> "One command runs every claim on testnet, including fifteen attempts to cheat: faking a delivery, taking the money back early, the worker key trying to move funds. Every one fails, with its reason code."
 
 Optional: show the DAO on the Mandate page: "The rules belong to a Sputnik DAO; only a vote can change them."
 
@@ -62,7 +62,7 @@ Post from your own account, with the video attached:
 >
 > The money sits in an account made for one job. Its only key can deliver, nothing else. Delivery pays at once, the deadline refunds, and every paid job raises the worker's on-chain standing, which unlocks bigger jobs.
 >
-> Agents hire agents over MCP. One command runs 24 checks on testnet.
+> Agents hire agents over MCP. One command runs 25 checks on testnet.
 >
 > https://clausehold.vercel.app
 > https://github.com/angelraph/clausehold
