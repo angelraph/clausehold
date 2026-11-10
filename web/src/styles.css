@@ -352,3 +352,7 @@ section { position: relative; }
 /* Acceptance check verdicts */
 .check-pass { color: var(--green); font-size: 14px; }
 .check-fail { color: var(--red); font-size: 14px; }
+
+/* Grid columns may shrink below their content; wide content (code, long account names) scrolls or wraps inside its own box. */
+.split > *, .grid-2 > *, .grid-3 > *, .story > *, .bento > *, .hero-desk > * { min-width: 0; }
+.mono { overflow-wrap: anywhere; }
