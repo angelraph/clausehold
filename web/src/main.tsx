@@ -21,6 +21,7 @@ const loadInvite = () => import("./pages/Invite");
 const loadReceipt = () => import("./pages/Receipt");
 const loadStanding = () => import("./pages/Standing");
 const loadFaucet = () => import("./pages/Faucet");
+const loadLeaderboard = () => import("./pages/Leaderboard");
 const loadNotFound = () => import("./pages/NotFound");
 const HowItWorks = lazy(loadHowItWorks);
 const Developers = lazy(loadDevelopers);
@@ -33,6 +34,7 @@ const Invite = lazy(loadInvite);
 const Receipt = lazy(loadReceipt);
 const Standing = lazy(loadStanding);
 const Faucet = lazy(loadFaucet);
+const Leaderboard = lazy(loadLeaderboard);
 const NotFound = lazy(loadNotFound);
 
 function ScrollToTop() {
@@ -45,7 +47,7 @@ function ScrollToTop() {
 
 function usePrefetchPages() {
   useEffect(() => {
-    const all = [loadHowItWorks, loadDevelopers, loadSecurity, loadMandate, loadDesk, loadNewClause, loadClauseDetail, loadInvite, loadReceipt, loadStanding, loadFaucet, loadNotFound];
+    const all = [loadHowItWorks, loadDevelopers, loadSecurity, loadMandate, loadDesk, loadNewClause, loadClauseDetail, loadInvite, loadReceipt, loadStanding, loadLeaderboard, loadFaucet, loadNotFound];
     const run = () => all.forEach((load) => load().catch(() => undefined));
     const w = window as Window & { requestIdleCallback?: (cb: () => void) => number };
     const id = w.requestIdleCallback ? w.requestIdleCallback(run) : window.setTimeout(run, 1200);
@@ -72,6 +74,7 @@ function Pages() {
           <Route path="/clause/:id" element={<ClauseDetail />} />
           <Route path="/w/:invite" element={<Invite />} />
           <Route path="/r/:clause" element={<Receipt />} />
+          <Route path="/standing" element={<Leaderboard />} />
           <Route path="/s/:account" element={<Standing />} />
           <Route path="/faucet" element={<Faucet />} />
           <Route path="*" element={<NotFound />} />

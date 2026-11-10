@@ -9,6 +9,7 @@ const LINKS = [
   { to: "/developers", label: "For agents" },
   { to: "/security", label: "Security" },
   { to: "/mandate", label: "Mandate" },
+  { to: "/standing", label: "Standing" },
   { to: "/desk", label: "Desk" },
 ];
 
@@ -80,6 +81,7 @@ export function Footer() {
               <li><Link to="/how-it-works">How it works</Link></li>
               <li><Link to="/desk">The desk</Link></li>
               <li><Link to="/mandate">Mandate</Link></li>
+              <li><Link to="/standing">Standing</Link></li>
               <li><Link to="/faucet">Testnet faucet</Link></li>
             </ul>
           </div>

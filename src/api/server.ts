@@ -40,6 +40,9 @@ import type { ChainCaller, ChainReader } from "../near/chain.js";
 import { OneClickError, assertQuoteFundsClause, buildClauseFundingQuote, findToken, type OneClickClient } from "../near/intents.js";
 import { RelayRefusedError, type RelayResult } from "../near/relayer.js";
 import { assetFor, networkProfile, toBaseUnits } from "../near/network.js";
+import { viewCall } from "../near/rpc.js";
+import { readStanding } from "../near/standing.js";
+import { badgeSvg, earnedLimit, leaderboard, type ChainMandate, type ChainReceipt } from "./standing.js";
 
 /**
  * What the API needs from the outside world. Each is optional: a route whose
@@ -109,6 +112,7 @@ function isPublicRoute(method: string, path: string): boolean {
   if (method === "GET" && /^\/funding\/[^/]+$/.test(path)) return true;
   if (method === "POST" && path === "/relay") return true;
   if (method === "GET" && path === "/network") return true;
+  if (method === "GET" && (path === "/leaderboard" || /^\/standing\/[^/]+(\/badge\.svg)?$/.test(path))) return true;
   if (method === "GET" && path === "/relay/prepare") return true;
   return false;
 }
@@ -384,6 +388,44 @@ export function createApp(deps: ApiDeps = {}): express.Express {
       res.json(await loadMandate(id));
     } catch {
       res.status(404).json({ error: `No mandate found with id ${id}` });
+    }
+  });
+
+  // ---- Earned standing: read from the factory, so nothing here can be edited by the desk ----
+
+  app.get("/standing/:account", async (req: Request, res: Response) => {
+    try {
+      const [standing, mandate] = await Promise.all([readStanding(String(req.params.account)), viewCall<ChainMandate | null>(config.factoryAccountId, "get_mandate")]);
+      res.json({ account: String(req.params.account), factory: config.factoryAccountId, standing, earned: mandate ? earnedLimit(standing, mandate) : null });
+    } catch (err) {
+      res.status(502).json({ error: `The factory did not answer: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  });
+
+  app.get("/standing/:account/badge.svg", async (req: Request, res: Response) => {
+    try {
+      const account = String(req.params.account);
+      const standing = await readStanding(account);
+      res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=300");
+      res.send(badgeSvg(account, standing, config.network === "testnet" ? "mUSD" : "USDC"));
+    } catch {
+      res.status(502).json({ error: "The factory did not answer" });
+    }
+  });
+
+  app.get("/leaderboard", async (_req: Request, res: Response) => {
+    try {
+      const receipts: ChainReceipt[] = [];
+      for (let from = 0; from < 5000; from += 100) {
+        const page = await viewCall<ChainReceipt[]>(config.factoryAccountId, "get_receipts", { from_index: from, limit: 100 });
+        receipts.push(...page);
+        if (page.length < 100) break;
+      }
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.json({ factory: config.factoryAccountId, receipts: receipts.length, rows: leaderboard(receipts) });
+    } catch (err) {
+      res.status(502).json({ error: `The factory did not answer: ${err instanceof Error ? err.message : String(err)}` });
     }
   });
 

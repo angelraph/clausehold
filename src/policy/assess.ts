@@ -4,6 +4,7 @@ import { evaluateClause } from "./engine.js";
 import { deriveKillSwitch } from "../approval/state.js";
 import { auditLog } from "../audit/log.js";
 import { config } from "../config.js";
+import { chainReleases } from "../near/standing.js";
 
 /**
  * Evaluates a clause against the mandate, what is already committed and the
@@ -11,8 +12,8 @@ import { config } from "../config.js";
  * when a human approval is about to be acted on.
  */
 export async function assessClause(proposal: ClauseProposal, mandate: Mandate, extra: Record<string, unknown> = {}): Promise<Verdict> {
-  const entries = await auditLog.all();
-  const verdict = evaluateClause(proposal, mandate, { entries, killSwitch: deriveKillSwitch(entries) });
+  const [entries, released] = await Promise.all([auditLog.all(), chainReleases(proposal.payee)]);
+  const verdict = evaluateClause(proposal, mandate, { entries, killSwitch: deriveKillSwitch(entries), chainReleases: released });
   await auditLog.append("VERDICT_ISSUED", config.network, { verdict, ...extra });
   return verdict;
 }

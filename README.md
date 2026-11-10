@@ -75,6 +75,16 @@ A treasury sets its rules once, and every clause is checked against them twice: 
 
 The factory reserves each clause's amount against the daily caps when it is written. A returned clause gives the reservation back; a released one keeps it counted.
 
+### Limits are earned
+
+A payee nobody has paid yet can be offered at most the new-payee ceiling (10 on testnet). Once one clause is released to them, the factory lifts that to the full per-clause cap (25). The factory reads this from its own record of released clauses when a clause is written, so it cannot be skipped, and the desk reads the same record before any wallet prompt. Ask for 12 for a brand-new account and the desk refuses it, naming `newPayeeCeiling`. Ask for 12 for `clausehold.testnet`, which has 3 released clauses, and it passes.
+
+Every account's record is public: the [Standing page](https://clausehold.vercel.app/standing) ranks payees by released clauses, and each account page shows the limit it has earned and a badge it can embed anywhere, drawn from the chain:
+
+```markdown
+[![Clausehold standing](https://clausehold-api-testnet.vercel.app/standing/clausehold.testnet/badge.svg)](https://clausehold.vercel.app/s/clausehold.testnet)
+```
+
 ### Owned by a DAO
 
 On testnet the factory belongs to a Sputnik DAO, [`clausehold-council.sputnikv2.testnet`](https://testnet.nearblocks.io/address/clausehold-council.sputnikv2.testnet). The rule changes only when the DAO votes for a proposal that calls `set_mandate`. Disputes on new clauses are settled with the DAO as co-signer.
@@ -142,6 +152,9 @@ An agent proposes work over HTTP. The desk answers PASS, VETO or ESCALATE before
 | `POST /relay` | submit the payee's signed delivery; the desk pays the gas |
 | `GET /desk/clauses` | every clause and where it stands |
 | `GET /mandate` | the active mandate |
+| `GET /standing/:account` | an account's record from the factory, and the largest clause it has earned |
+| `GET /standing/:account/badge.svg` | an embeddable badge drawn from that record |
+| `GET /leaderboard` | payees ranked by released clauses, from every factory receipt |
 
 The hosted testnet desk is https://clausehold-api-testnet.vercel.app. The routes above are open, because the website calls them without a key. `/relay` only ever submits a delivery that the payee's own key signed. Routes that decide something (approve, halt) or make the desk sign any other call need an API key. More examples are on the [For agents](https://clausehold.vercel.app/developers) page.
 

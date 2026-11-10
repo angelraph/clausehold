@@ -81,6 +81,19 @@ describe("evaluateClause", () => {
     expect(known.decision).toBe("PASS");
   });
 
+  it("lets standing earned on chain lift the new-payee ceiling, even with no local history", () => {
+    const earned = evaluateClause(clause({ amount: 12 }), mandate, { now: NOW, chainReleases: 1 });
+    expect(earned.decision).toBe("PASS");
+    expect(earned.reasons.find((r) => r.rule === "newPayeeCeiling")?.detail).toContain("1 released clause on chain");
+    // Zero or an unanswered chain read changes nothing.
+    expect(violated(evaluateClause(clause({ amount: 12 }), mandate, { now: NOW, chainReleases: 0 }))).toEqual(["newPayeeCeiling"]);
+    expect(violated(evaluateClause(clause({ amount: 12 }), mandate, { now: NOW, chainReleases: null }))).toEqual(["newPayeeCeiling"]);
+    // Earned standing never lifts the hard per-clause cap.
+    const big = violated(evaluateClause(clause({ amount: 40 }), mandate, { now: NOW, chainReleases: 5 }));
+    expect(big).toContain("maxPerClause");
+    expect(big).not.toContain("newPayeeCeiling");
+  });
+
   it("escalates above confirmAbove instead of vetoing", () => {
     const v = evaluateClause(clause({ amount: 20 }), mandate, { now: NOW, entries: [released("editor.testnet")] });
     expect(v.decision).toBe("ESCALATE");

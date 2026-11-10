@@ -13,6 +13,8 @@ export interface EvaluationContext {
   entries?: AuditEntry[];
   killSwitch?: KillSwitchState;
   now?: Date;
+  /** Released clauses the payee has on chain (factory standing). Earned standing lifts the new-payee ceiling. */
+  chainReleases?: number | null;
 }
 
 /**
@@ -32,7 +34,7 @@ export function evaluateClause(proposal: ClauseProposal, mandate: Mandate, conte
     checkPayeeAllowlist(proposal, mandate),
     checkDeadline(proposal, mandate, now),
     checkMaxPerClause(proposal, mandate),
-    checkNewPayeeCeiling(proposal, mandate, entries),
+    checkNewPayeeCeiling(proposal, mandate, entries, context.chainReleases),
     checkPerPayeeDailyCap(proposal, mandate, entries, now),
     checkDailySpendCap(proposal, mandate, entries, now),
     checkClauseRate(proposal, mandate, entries, now),

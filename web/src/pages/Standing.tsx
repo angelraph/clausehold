@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { PageHead } from "../components/Page";
 import { StatusChip } from "../components/Status";
 import { useNetwork } from "../lib/network";
-import { chainTime, readReceipts, readStanding, tokenAmount, tokenSymbol, type ChainReceipt, type RoleStats, type Standing as StandingView } from "../lib/records";
+import { chainTime, earnedLimit, readFactoryMandate, readReceipts, readStanding, tokenAmount, tokenSymbol, type ChainMandate, type ChainReceipt, type RoleStats, type Standing as StandingView } from "../lib/records";
 
 /**
  * An account's track record, read from the factory contract: how many
@@ -15,14 +15,16 @@ export default function Standing() {
   const [standing, setStanding] = useState<StandingView | null>(null);
   const [receipts, setReceipts] = useState<ChainReceipt[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const [mandate, setMandate] = useState<ChainMandate | null>(null);
 
   useEffect(() => {
     setStanding(null);
     setReceipts(null);
     setFailed(false);
-    Promise.all([readStanding(network, account), readReceipts(network, account)])
-      .then(([s, r]) => {
+    Promise.all([readStanding(network, account), readReceipts(network, account), readFactoryMandate(network).catch(() => null)])
+      .then(([s, r, m]) => {
         setStanding(s);
+        setMandate(m);
         setReceipts([...r].sort((a, b) => b.at - a.at));
       })
       .catch(() => setFailed(true));
@@ -42,6 +44,7 @@ export default function Standing() {
             <Role title="As a buyer" note="Clauses this account paid for." stats={standing.as_buyer} symbol={symbol} paidLabel="Paid out" />
           </div>
         )}
+        {standing && mandate && <Earned account={account} standing={standing} mandate={mandate} symbol={symbol} apiBase={network.apiBase} />}
         {receipts && (
           <div className="card table-wrap">
             {receipts.length === 0 ? (
@@ -85,6 +88,37 @@ function Role({ title, note, stats, symbol, paidLabel }: { title: string; note: 
         <div className="mini-row"><span className="faint">Returned</span><span className="mono">{stats.returned}</span></div>
         <div className="mini-row"><span className="faint">Open now</span><span className="mono">{stats.open}</span></div>
         <div className="mini-row"><span className="faint">{paidLabel}</span><span className="mono" style={{ color: "var(--text)" }}>{tokenAmount(stats.released_volume)} {symbol}</span></div>
+      </div>
+    </div>
+  );
+}
+
+/** What this payee's record unlocks under the current mandate, plus a badge anyone can embed. */
+function Earned({ account, standing, mandate, symbol, apiBase }: { account: string; standing: StandingView; mandate: ChainMandate; symbol: string; apiBase: string }) {
+  const { limit, lifted } = earnedLimit(standing, mandate);
+  const page = `${window.location.origin}/s/${account}`;
+  const badge = `${apiBase}/standing/${account}/badge.svg`;
+  const snippet = `[![Clausehold standing](${badge})](${page})`;
+  return (
+    <div className="grid-2">
+      <div className="card card-pad">
+        <h2 className="h3">Limit this account has earned</h2>
+        <div className="mono" style={{ fontSize: 28, marginTop: 10, color: "var(--text)" }}>{tokenAmount(limit)} {symbol}</div>
+        <p className="muted" style={{ fontSize: 14, marginTop: 8 }}>
+          {lifted
+            ? <>Lifted to the full per-clause cap, because {standing.as_payee.released} {standing.as_payee.released === 1 ? "clause was" : "clauses were"} released to this account.</>
+            : <>Held at the new-payee ceiling until one clause is released to this account. Then it rises to {tokenAmount(mandate.max_per_clause)} {symbol}.</>}
+        </p>
+        <p className="faint" style={{ fontSize: 13, margin: 0 }}>The factory checks this when a clause is written. No one can skip it.</p>
+      </div>
+      <div className="card card-pad" style={{ display: "grid", gap: 10, alignContent: "start" }}>
+        <h2 className="h3">Show it anywhere</h2>
+        <img src={badge} alt={`Clausehold standing for ${account}`} height={20} style={{ justifySelf: "start" }} />
+        <p className="muted" style={{ fontSize: 14, margin: 0 }}>Put this on a profile or a README. It is drawn from the chain, and it links back here so anyone can check it.</p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input className="input mono" readOnly value={snippet} onFocus={(e) => e.currentTarget.select()} aria-label="Badge markdown" />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigator.clipboard?.writeText(snippet)}>Copy</button>
+        </div>
       </div>
     </div>
   );
