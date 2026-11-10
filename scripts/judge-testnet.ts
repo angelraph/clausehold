@@ -16,6 +16,7 @@
  * Env: CLAUSEHOLD_JUDGE_BUYER (default clausehold-ops.testnet) and
  * CLAUSEHOLD_JUDGE_WORKER (default clausehold.testnet), keys in ~/.near-credentials/testnet.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Account, KeyPair, type KeyPairString } from "near-api-js";
@@ -119,7 +120,12 @@ async function main() {
 
   // ------------------------------------------------------------------ C
   section("C. One job, start to finish, attacked while the money is held");
-  const job = await openJob({ buyer: BUYER, payee: WORKER, amount: 2, terms: "judge: cut intro.mp4 to 30 seconds", minutes: 30, agentId: "judge" }, env);
+  const deliverable = "intro-30s.mp4, cut at 00:00 to 00:30";
+  const expected = createHash("sha256").update(deliverable).digest("hex");
+  const job = await openJob(
+    { buyer: BUYER, payee: WORKER, amount: 2, terms: "judge: cut intro.mp4 to 30 seconds", minutes: 30, agentId: "judge", check: { kind: "sha256", value: expected } },
+    env
+  );
   if (!job.inviteId) throw new Error(`The main job did not clear: ${job.decision}`);
   const accepted = await acceptJob(job.inviteId, env);
   ok("the worker made its job key and bound it", accepted.publicKey);
@@ -148,10 +154,11 @@ async function main() {
   );
 
   const workerBefore = BigInt((await provider(env).callFunction({ contractId: env.token, method: "ft_balance_of", args: { account_id: WORKER } })) as string);
-  const done = await deliver(job.inviteId, "intro-30s.mp4, cut at 00:00 to 00:30", env);
+  await refused("a delivery that fails the buyer's acceptance check is never relayed", /acceptance check failed[^.]*/, () => deliver(job.inviteId as string, "the wrong file", env));
+  const done = await deliver(job.inviteId, deliverable, env);
   const workerAfter = BigInt((await provider(env).callFunction({ contractId: env.token, method: "ft_balance_of", args: { account_id: WORKER } })) as string);
   workerAfter - workerBefore === toBase6(2)
-    ? ok("the worker delivered with no gas and was paid 2 mUSD in the same transaction", tx(done.txHash))
+    ? ok("the right file passed the check; the worker delivered with no gas and was paid 2 mUSD in the same transaction", tx(done.txHash))
     : bad("the worker was paid", `balance moved by ${workerAfter - workerBefore}`);
   const after = await checkPayee(WORKER, env);
   after.released === proven.released + 1 ? ok(`the worker's standing rose from ${proven.released} to ${after.released} released`) : bad("standing rose", `${proven.released} -> ${after.released}`);

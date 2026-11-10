@@ -16,6 +16,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { AcceptanceCheckSchema } from "../verify/checks.js";
 import { acceptJob, agentAccount, agentEnv, checkPayee, closeJob, deliver, jobStatus, openJob, writeAndFund } from "../agent/index.js";
 
 const env = agentEnv();
@@ -55,6 +56,7 @@ server.registerTool(
       terms: z.string().min(3).max(2000).describe("What must be delivered, in plain words"),
       minutes: z.number().int().positive().max(10080).optional().describe("Minutes until the job expires and the money returns (default 30)"),
       reviewSeconds: z.number().int().min(0).optional().describe("Seconds after delivery during which the buyer may freeze (default 0: delivery pays at once)"),
+      check: AcceptanceCheckSchema.optional().describe("Optional acceptance check the desk runs on every delivery before relaying it: {kind:\"url_contains\",url,text}, {kind:\"github_pr_merged\",repo:\"owner/name\",pr}, or {kind:\"sha256\",value}"),
     },
   },
   (a) => run(() => openJob({ buyer: agentAccount(undefined, env).accountId, ...a }, env))

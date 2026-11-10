@@ -10,6 +10,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Account, JsonRpcProvider, KeyPair, type KeyPairString } from "near-api-js";
+import type { AcceptanceCheck } from "../verify/checks.js";
 import { delegateSigningBytes, encodeDeliveryDelegate, encodeSignedDelegate, publicKeyBytes, toBase64 } from "../../web/src/lib/delegate.js";
 
 export interface AgentEnv {
@@ -121,7 +122,7 @@ export interface OpenedJob {
 
 /** Proposes a job. The desk checks it against the mandate before anyone signs. */
 export async function openJob(
-  o: { buyer: string; payee: string; amount: number; terms: string; minutes?: number; reviewSeconds?: number; agentId?: string },
+  o: { buyer: string; payee: string; amount: number; terms: string; minutes?: number; reviewSeconds?: number; agentId?: string; check?: AcceptanceCheck },
   env: AgentEnv = agentEnv()
 ): Promise<OpenedJob> {
   const r = await desk<{ proposal: { id: string }; verdict: { decision: OpenedJob["decision"]; reasons: OpenedJob["reasons"] }; invite: { inviteId: string; path: string } | null }>(
@@ -138,6 +139,7 @@ export async function openJob(
         terms: o.terms,
         deadlineMinutes: o.minutes ?? 30,
         challengeSecs: o.reviewSeconds ?? 0,
+        ...(o.check ? { check: o.check } : {}),
       }),
     },
     env

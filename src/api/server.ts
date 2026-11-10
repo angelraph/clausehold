@@ -26,6 +26,7 @@ import {
   InviteNotFoundError,
   InviteStateError,
   bindKey,
+  deriveInvites,
   findInviteByProposal,
   getInvite,
   openInvite,
@@ -38,7 +39,8 @@ import { deriveDesk, type DeskClause } from "../desk/view.js";
 import { isTerminal, syncClauseFromChain } from "../desk/chainSync.js";
 import type { ChainCaller, ChainReader } from "../near/chain.js";
 import { OneClickError, assertQuoteFundsClause, buildClauseFundingQuote, findToken, type OneClickClient } from "../near/intents.js";
-import { DeliveryRefusedError, RelayRefusedError, type RelayResult } from "../near/relayer.js";
+import { decodeSignedDelegate, DeliveryRefusedError, RelayRefusedError, type RelayResult } from "../near/relayer.js";
+import { AcceptanceCheckSchema, describeCheck, runCheck } from "../verify/checks.js";
 import { assetFor, networkProfile, toBaseUnits } from "../near/network.js";
 import { viewCall } from "../near/rpc.js";
 import { readStanding } from "../near/standing.js";
@@ -75,6 +77,8 @@ const ClauseBodySchema = z.object({
   terms: z.string().min(1).max(2000),
   deadlineMinutes: z.number().positive(),
   challengeSecs: z.number().int().min(0).optional(),
+  /** Optional test every delivery must pass before the desk relays it. */
+  check: AcceptanceCheckSchema.optional(),
 });
 
 const DecisionBodySchema = z.object({ note: z.string().optional() });
@@ -108,6 +112,7 @@ function isPublicRoute(method: string, path: string): boolean {
   }
   if (method === "GET" && /^\/invites\/[^/]+$/.test(path)) return true;
   if (method === "POST" && /^\/invites\/[^/]+\/key$/.test(path)) return true;
+  if (method === "POST" && /^\/invites\/[^/]+\/check$/.test(path)) return true;
   if (method === "POST" && /^\/clauses\/[^/]+\/fund\/quote$/.test(path)) return true;
   if (method === "GET" && /^\/funding\/[^/]+$/.test(path)) return true;
   if (method === "POST" && path === "/relay") return true;
@@ -262,7 +267,8 @@ export function createApp(deps: ApiDeps = {}): express.Express {
     }
 
     try {
-      const result = await runClause({ ...parsed.data, agentId });
+      const { check, ...clause } = parsed.data;
+      const result = await runClause({ ...clause, agentId });
       recent.set(result.proposal.id, result);
       res.status(200).json(view(result));
     } catch (err) {
@@ -471,13 +477,14 @@ export function createApp(deps: ApiDeps = {}): express.Express {
       return;
     }
     try {
-      const result = await runClause({ ...parsed.data, agentId });
+      const { check, ...clause } = parsed.data;
+      const result = await runClause({ ...clause, agentId });
       recent.set(result.proposal.id, result);
       if (result.verdict.decision === "VETO") {
         res.status(200).json({ ...view(result), invite: null });
         return;
       }
-      const { inviteId } = await openInvite(result.proposal);
+      const { inviteId } = await openInvite(result.proposal, check);
       res.status(200).json({ ...view(result), invite: { inviteId, path: `/w/${inviteId}` } });
     } catch (err) {
       if (err instanceof MandateNotFoundError) {
@@ -505,6 +512,25 @@ export function createApp(deps: ApiDeps = {}): express.Express {
         return;
       }
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Run the acceptance check now, without delivering: the worker can see whether it will pass.
+  app.post("/invites/:id/check", async (req: Request, res: Response) => {
+    try {
+      const invite = await getInvite(req.params.id as string);
+      if (!invite.check) {
+        res.status(404).json({ error: "This job has no acceptance check" });
+        return;
+      }
+      const hash = typeof req.body?.hash === "string" ? req.body.hash : undefined;
+      res.json({ check: describeCheck(invite.check), verdict: await runCheck(invite.check, hash) });
+    } catch (err) {
+      if (err instanceof InviteNotFoundError) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      throw err;
     }
   });
 
@@ -711,6 +737,22 @@ export function createApp(deps: ApiDeps = {}): express.Express {
     if (!body.success) {
       res.status(400).json({ error: "Body must be { signedDelegate: <base64> }" });
       return;
+    }
+    // The buyer's acceptance check runs before anything is sent. A failing delivery is never relayed here.
+    try {
+      const decoded = decodeSignedDelegate(body.data.signedDelegate);
+      const invite = [...deriveInvites(await auditLog.all()).values()].find((i) => i.clauseAccountId === decoded.senderId);
+      if (invite?.check) {
+        const verdict = await runCheck(invite.check, typeof decoded.args.hash === "string" ? decoded.args.hash : undefined);
+        await auditLog.append("DELIVERY_CHECKED", config.network, { inviteId: invite.inviteId, clauseAccountId: decoded.senderId, verdict });
+        if (!verdict.passed) {
+          res.status(422).json({ error: `The acceptance check failed: ${verdict.detail}. Nothing was sent.`, check: verdict });
+          return;
+        }
+      }
+    } catch (err) {
+      // Undecodable: the relayer below refuses it with the exact reason.
+      if (!(err instanceof RelayRefusedError)) throw err;
     }
     try {
       const result = await deps.relay(body.data.signedDelegate);

@@ -7,7 +7,7 @@ The money is held under a clause, and the clause is the only key that moves it. 
 - Live site: https://clausehold.vercel.app (Testnet by default, switch at the top)
 - Testnet factory: [`clausehold.testnet`](https://testnet.nearblocks.io/address/clausehold.testnet)
 - Built for NEAR HACKATHON, November 2026. Tracks: agents, realworld, social, security.
-- **Judges:** [JUDGES.md](JUDGES.md) has a five-minute path. `npm run judge` runs every claim on testnet, including 14 attempts to break the rules that must each fail with their reason code.
+- **Judges:** [JUDGES.md](JUDGES.md) has a five-minute path. `npm run judge` runs every claim on testnet, including 15 attempts to break the rules that must each fail with their reason code.
 
 ## The problem
 
@@ -75,6 +75,16 @@ A treasury sets its rules once, and every clause is checked against them twice: 
 > Stablecoins only. No clause above $25. Anything above $15 needs a second person. At most $50 to any one payee a day and $200 in total a day. A payee who has never delivered gets at most $10. A clause may stay open for at most a week.
 
 The factory reserves each clause's amount against the daily caps when it is written. A returned clause gives the reservation back; a released one keeps it counted.
+
+### Acceptance checks
+
+The buyer can attach a test that every delivery must pass before the desk relays it:
+
+- a public https page must contain some text (the site is live, the post is up)
+- a GitHub pull request must be merged (the fix landed)
+- the delivery must be an exact file (its SHA-256 is agreed in advance)
+
+The payee sees the check on the invite page and can run it before delivering. A delivery that fails is refused before anything is sent, with the reason (`The acceptance check failed: ...`), so through the desk it is never paid. The contract itself still only checks who delivered, so a buyer who wants a hard stop also sets a review window and can freeze the clause for the DAO co-signer to decide. Agents attach the same checks through the MCP `clausehold_open_job` tool.
 
 ### Limits are earned
 

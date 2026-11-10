@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { ApiDown, timeLeft } from "../components/Page";
 import { StatusChip } from "../components/Status";
 import { LogoMark } from "../components/Logo";
-import { api, ApiError, type InviteView } from "../lib/api";
+import { api, ApiError, type AcceptanceCheck, type CheckVerdict, type InviteView } from "../lib/api";
 import { createWorkerKey, ed25519Supported, loadWorkerKey, type WorkerKey } from "../lib/workerKey";
 import { hashFile, hashText, submitDelivery } from "../lib/deliver";
 import { assetLabel, explorerAccount, useNetwork } from "../lib/network";
@@ -72,6 +72,8 @@ export default function Invite() {
             <div className="mini-row"><span className="faint">Deliver within</span><span>{settled ? "Settled" : timeLeft(inv.deadline)}</span></div>
             <div className="mini-row"><span className="faint">Status</span><StatusChip status={lapsed ? "expired" : inv.status === "written" ? "open" : "awaiting"} /></div>
           </div>
+
+          {inv.check && <CheckPanel inviteId={inviteId} check={inv.check} last={inv.lastCheck ?? null} />}
 
           {lapsed && (
             <div className="notice" style={{ marginTop: 22 }}>This invite expired before the clause was written, so nothing was signed and no money moved. Ask the buyer for a new link.</div>
@@ -163,6 +165,32 @@ function Deliver({ clauseAccountId, workerKey, chainStatus, onDone }: { clauseAc
         <div className="notice notice-green">
           Delivered{done.status === "CLAUSE_RELEASED" ? " and paid" : ""}. <a className="link-arrow" href={explorerAccount(network, clauseAccountId)} target="_blank" rel="noreferrer">See it on the explorer</a>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** The buyer's acceptance check: what it is, how the last delivery did, and a dry run. */
+function CheckPanel({ inviteId, check, last }: { inviteId: string; check: AcceptanceCheck & { description: string }; last: CheckVerdict | null }) {
+  const [result, setResult] = useState<CheckVerdict | null>(last);
+  const [busy, setBusy] = useState(false);
+  const shown = result ?? last;
+  async function test() {
+    setBusy(true);
+    try {
+      setResult((await api.runCheck(inviteId)).verdict);
+    } catch (e) {
+      setResult({ passed: false, detail: e instanceof Error ? e.message : String(e), checkedAt: new Date().toISOString() });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="notice" style={{ marginTop: 18, display: "grid", gap: 8 }}>
+      <div><strong>Acceptance check.</strong> {check.description}. The desk runs it on your delivery before sending it, and a delivery that fails is not paid.</div>
+      {shown && <div className={shown.passed ? "check-pass" : "check-fail"}>{shown.passed ? "Passes" : "Fails"}: {shown.detail}</div>}
+      {check.kind !== "sha256" && (
+        <button type="button" className="btn btn-ghost btn-sm" style={{ justifySelf: "start" }} onClick={test} disabled={busy}>{busy ? "Checking" : "Test it now"}</button>
       )}
     </div>
   );

@@ -18,6 +18,12 @@ export default function NewClause() {
     terms: "",
     deadlineMinutes: "15",
     challengeSecs: "0",
+    checkKind: "none",
+    checkUrl: "",
+    checkText: "",
+    checkRepo: "",
+    checkPr: "",
+    checkSha: "",
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +33,14 @@ export default function NewClause() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!w.accountId) return;
+    const check =
+      form.checkKind === "url_contains"
+        ? { kind: "url_contains", url: form.checkUrl.trim(), text: form.checkText.trim() }
+        : form.checkKind === "github_pr_merged"
+          ? { kind: "github_pr_merged", repo: form.checkRepo.trim(), pr: Number(form.checkPr) }
+          : form.checkKind === "sha256"
+            ? { kind: "sha256", value: form.checkSha.trim().toLowerCase() }
+            : null;
     setBusy(true);
     setError(null);
     setResult(null);
@@ -42,6 +56,7 @@ export default function NewClause() {
           terms: form.terms.trim(),
           deadlineMinutes: Number(form.deadlineMinutes),
           challengeSecs: Number(form.challengeSecs),
+          ...(check ? { check } : {}),
         })
       );
     } catch (err) {
@@ -86,6 +101,33 @@ export default function NewClause() {
               <input id="challenge" className="input mono" inputMode="numeric" value={form.challengeSecs} onChange={set("challengeSecs")} />
             </div>
           </div>
+          <div className="field">
+            <label htmlFor="checkKind">Acceptance check (optional)</label>
+            <select id="checkKind" className="select" value={form.checkKind} onChange={set("checkKind")}>
+              <option value="none">None: any delivery pays</option>
+              <option value="url_contains">A web page must contain some text</option>
+              <option value="github_pr_merged">A GitHub pull request must be merged</option>
+              <option value="sha256">The delivery must be an exact file</option>
+            </select>
+          </div>
+          {form.checkKind === "url_contains" && (
+            <div className="grid-2">
+              <div className="field"><label htmlFor="checkUrl">Page (https)</label><input id="checkUrl" className="input mono" required type="url" placeholder="https://example.com/launch" value={form.checkUrl} onChange={set("checkUrl")} /></div>
+              <div className="field"><label htmlFor="checkText">Must contain</label><input id="checkText" className="input" required maxLength={200} placeholder="Now live" value={form.checkText} onChange={set("checkText")} /></div>
+            </div>
+          )}
+          {form.checkKind === "github_pr_merged" && (
+            <div className="grid-2">
+              <div className="field"><label htmlFor="checkRepo">Repository</label><input id="checkRepo" className="input mono" required pattern="[\w.-]+/[\w.-]+" placeholder="owner/name" value={form.checkRepo} onChange={set("checkRepo")} /></div>
+              <div className="field"><label htmlFor="checkPr">Pull request number</label><input id="checkPr" className="input mono" required inputMode="numeric" placeholder="42" value={form.checkPr} onChange={set("checkPr")} /></div>
+            </div>
+          )}
+          {form.checkKind === "sha256" && (
+            <div className="field"><label htmlFor="checkSha">SHA-256 of the file</label><input id="checkSha" className="input mono" required pattern="[0-9a-fA-F]{64}" placeholder="64 hex characters" value={form.checkSha} onChange={set("checkSha")} /></div>
+          )}
+          {form.checkKind !== "none" && (
+            <p className="faint" style={{ fontSize: 13, margin: 0 }}>The desk runs this check on every delivery before relaying it, and a delivery that fails is not paid through the desk. Add a review window if you also want to be able to freeze the clause.</p>
+          )}
           {w.accountId ? (
             <>
               <p className="faint" style={{ fontSize: 13, margin: 0 }}>

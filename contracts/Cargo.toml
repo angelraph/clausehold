@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["clause", "factory", "mock-ft", "sandbox-tests"]
+members = ["clause", "factory", "mock-ft", "cleanup", "sandbox-tests"]
 
 [workspace.package]
 edition = "2021"

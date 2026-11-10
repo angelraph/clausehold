@@ -46,6 +46,7 @@ Two copies of the Clausehold MCP server, a buyer agent and a worker agent, each 
 | the worker key cannot move NEAR | a transfer signed by the worker key | protocol: needs full access |
 | the worker key cannot call other methods | `expire` signed by the worker key | protocol: method not allowed |
 | the worker key cannot call other contracts | a call to the token signed by the worker key | protocol: receiver mismatch |
+| a delivery that fails the buyer's acceptance check is never relayed | the job carries a `sha256` check; the wrong file is sent first | `acceptance check failed` |
 | delivery is gasless and pays at once | the worker's delegate is relayed; its balance rises by exactly 2 | |
 | standing rises with each paid job | factory `standing` before and after | |
 | the storage deposit comes back | `close` deletes the account; the buyer's NEAR rises by about 1.99 | |
