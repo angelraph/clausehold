@@ -41,6 +41,22 @@ Everything below is on testnet, so it is free.
 
 To see a refusal, go back to step 2 and ask for `12`. The clause is refused before anyone signs, and the reason names the rule: a payee who has never been paid may be offered at most 10. Ask for `40` and the per-clause cap of 25 refuses it too. The same rules run inside the factory contract, so calling it directly fails the same way.
 
+## Live on mainnet
+
+The factory is deployed at [`clausehold.near`](https://nearblocks.io/address/clausehold.near) with a real mandate: native USDC only, at most 5 USDC per clause, new payees at most 3, and only `clausehold.near` may write clauses. One real job ran end to end with real USDC:
+
+| step | transaction |
+|---|---|
+| deploy the factory | [`57Ujmi4P…`](https://nearblocks.io/txns/57Ujmi4PcRfH4ZqFiYTeLjuE9Jn6u5zB38cm3aB5KGC8) |
+| upload the clause code (same code as testnet, sha256 `a765271079ca…`) | [`5ZXubHJ1…`](https://nearblocks.io/txns/5ZXubHJ1uAAxsMtTfpTkpgUPRuFhEhVYaWWEAZbQxerL) |
+| set the mandate | [`hU8Tq2Ej…`](https://nearblocks.io/txns/hU8Tq2EjKnVLgejcqh24VNQjHDqVYVH39WkeL9xLxWJ) |
+| write `r-0.clausehold.near` for 2 USDC to `angelraph.near` | [`JDosYTk7…`](https://nearblocks.io/txns/JDosYTk7TysbDYEN6n2yj5tfHQmpFAxGBcrXtQcgu4Le) |
+| fund it with 2 USDC | [`H7frpW7B…`](https://nearblocks.io/txns/H7frpW7BVVoqTNSERMzBGRgy3T6A3xxWC6bgrjZAbx6d) |
+| the worker key signs the delivery, `clausehold.near` relays it; released, `angelraph.near` +2 USDC | [`FCJwGQWG…`](https://nearblocks.io/txns/FCJwGQWGatZ4MVjai1KNMRnCNwzfgZmrimCvFFTWZZpW) |
+| close: the account deletes itself, 1.986 NEAR back to the buyer | [`8bKWE8is…`](https://nearblocks.io/txns/8bKWE8isMrGPZUKS5HRG1RPwQu9e4TTFx4hcHr13mKVW) |
+
+Funding from another chain goes through NEAR Intents. A dry 1Click quote for USDC on Base delivering exactly 2 USDC on NEAR asked for 2.0206 USDC and estimated 35 seconds, with refunds set to land on NEAR. `npx tsx scripts/mainnet-proof.ts --payee <account> --dry` prints the costs of a run without sending anything.
+
 ## What it looks like on chain
 
 A real run from the website with a browser wallet, clause [`r-2.clausehold.testnet`](https://testnet.nearblocks.io/address/r-2.clausehold.testnet):
@@ -216,7 +232,8 @@ The full threat model, with the test behind each control and the known weaknesse
 ## Honest limits
 
 - Writing a clause stores a small contract on chain, which needs about 1.97 NEAR from the buyer while the clause runs. It is a deposit, not a fee: once the clause settles, anyone can close it, and the account deletes itself and sends that NEAR back to the buyer. The buyer still needs the 2 NEAR up front.
-- Funding through NEAR Intents is mainnet only, because 1Click has no testnet. On testnet, clauses are funded directly with mUSD.
+- Funding through NEAR Intents is mainnet only, because 1Click has no testnet. On testnet, clauses are funded directly with mUSD. On mainnet the one clause so far was funded directly with USDC; the Intents path was checked with a dry quote, not a paid cross-chain transfer.
+- The mainnet factory is owned by `clausehold.near` itself for now, not yet by a DAO.
 - The testnet DAO has a single council member, so one vote passes a proposal. That proves the wiring; a real treasury would add its members and raise the threshold.
 
 ## What is in this repository

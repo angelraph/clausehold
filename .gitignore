@@ -5,3 +5,6 @@ data/*.jsonl
 data/mandates/
 *.log
 .DS_Store
+
+# Rendered demo video (posted on X, not stored in git)
+demo/

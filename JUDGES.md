@@ -60,7 +60,8 @@ Two copies of the Clausehold MCP server, a buyer agent and a worker agent, each 
 
 ## On chain
 
-- Factory: `clausehold.testnet`, owned by the Sputnik DAO `clausehold-council.sputnikv2.testnet`. Proposal 0 set the mandate's co-signer; proposal 1 uploaded the current clause code.
+- Mainnet: factory `clausehold.near`. Clause `r-0.clausehold.near` paid 2 real USDC to `angelraph.near` with a relayed delivery, then closed and returned its deposit. Transactions are in the README under "Live on mainnet".
+- Testnet factory: `clausehold.testnet`, owned by the Sputnik DAO `clausehold-council.sputnikv2.testnet`. Proposal 0 set the mandate's co-signer; proposal 1 uploaded the current clause code.
 - Every clause is `r-<n>.clausehold.testnet`. The README lists the transactions of clauses written from a browser wallet, by MCP agents, and by this judge run.
 
 ## Known limits
