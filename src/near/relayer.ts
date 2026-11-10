@@ -191,7 +191,32 @@ export async function relayDelivery(
   await checkDeliveryOnChain(d, opts.provider);
   const res = await relayer.relayMetaTransaction(d.signedDelegate);
   const txHash = (res as { transaction?: { hash?: string } }).transaction?.hash ?? "";
-  const failure = (res as { status?: { Failure?: unknown } }).status?.Failure;
-  if (failure) throw new Error(`Relayed delivery failed on chain: ${JSON.stringify(failure)}`);
+  const failure = (res as { status?: { Failure?: unknown } }).status?.Failure ?? innerFailure(res, d.senderId);
+  if (failure) throw new DeliveryRefusedError(`The clause refused the delivery: ${panicReason(failure)}`, txHash);
   return { txHash, senderId: d.senderId };
+}
+
+/** The relayed transaction succeeded, but the clause itself refused the call (for example after the deadline). */
+export class DeliveryRefusedError extends Error {
+  constructor(
+    message: string,
+    readonly txHash: string
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * A meta-transaction's outer status reports the delegate action, not the
+ * call inside it. The call runs as its own receipt on the clause account, so
+ * a panic there (DEADLINE_PASSED, NOT_FUNDED...) only shows in that receipt.
+ */
+export function innerFailure(res: unknown, clauseAccountId: string): unknown {
+  const receipts = (res as { receipts_outcome?: Array<{ outcome?: { executor_id?: string; status?: { Failure?: unknown } } }> }).receipts_outcome ?? [];
+  return receipts.find((r) => r.outcome?.executor_id === clauseAccountId && r.outcome.status?.Failure)?.outcome?.status?.Failure;
+}
+
+function panicReason(failure: unknown): string {
+  const s = JSON.stringify(failure);
+  return s.match(/Smart contract panicked: ([A-Z_:]+[^"\\]*)/)?.[1] ?? s.slice(0, 200);
 }

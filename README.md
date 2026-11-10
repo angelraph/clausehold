@@ -7,6 +7,7 @@ The money is held under a clause, and the clause is the only key that moves it. 
 - Live site: https://clausehold.vercel.app (Testnet by default, switch at the top)
 - Testnet factory: [`clausehold.testnet`](https://testnet.nearblocks.io/address/clausehold.testnet)
 - Built for NEAR HACKATHON, November 2026. Tracks: agents, realworld, social, security.
+- **Judges:** [JUDGES.md](JUDGES.md) has a five-minute path. `npm run judge` runs every claim on testnet, including 14 attempts to break the rules that must each fail with their reason code.
 
 ## The problem
 

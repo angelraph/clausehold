@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { actions, buildDelegateAction, encodeSignedDelegate, KeyPair, KeyPairSigner, PublicKey } from "near-api-js";
-import { checkDeliveryOnChain, checkDeliveryStatic, decodeSignedDelegate, isClauseAccount, RelayRefusedError, relayDelivery } from "../src/near/relayer.js";
+import { checkDeliveryOnChain, checkDeliveryStatic, decodeSignedDelegate, DeliveryRefusedError, isClauseAccount, RelayRefusedError, relayDelivery } from "../src/near/relayer.js";
 
 const FACTORY = "clausehold.testnet";
 const CLAUSE = `r-104.${FACTORY}`;
@@ -156,7 +156,24 @@ describe("relayDelivery", () => {
 
   it("reports an on-chain failure instead of claiming success", async () => {
     const relayer = { relayMetaTransaction: async () => ({ transaction: { hash: "TX2" }, status: { Failure: { ActionError: "x" } } }) as never };
-    await expect(relayDelivery(relayer, await build(), { factoryAccountId: FACTORY, provider: chain() })).rejects.toThrow(/failed on chain/);
+    await expect(relayDelivery(relayer, await build(), { factoryAccountId: FACTORY, provider: chain() })).rejects.toThrow(/clause refused the delivery/);
+  });
+
+  it("reports a panic inside the relayed call, even when the outer status is a success", async () => {
+    const delegate = await build();
+    const sender = decodeSignedDelegate(delegate).senderId;
+    const relayer = {
+      relayMetaTransaction: async () =>
+        ({
+          transaction: { hash: "TX3" },
+          status: { SuccessValue: "" },
+          receipts_outcome: [{ outcome: { executor_id: sender, status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: "Smart contract panicked: DEADLINE_PASSED" } } } } } } }],
+        }) as never,
+    };
+    const err = await relayDelivery(relayer, delegate, { factoryAccountId: FACTORY, provider: chain() }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DeliveryRefusedError);
+    expect((err as DeliveryRefusedError).message).toContain("DEADLINE_PASSED");
+    expect((err as DeliveryRefusedError).txHash).toBe("TX3");
   });
 });
 

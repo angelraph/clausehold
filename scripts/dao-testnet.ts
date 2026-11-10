@@ -35,7 +35,7 @@ const CREATE_DEPOSIT = 6n * NEAR;
 const PROPOSAL_BOND = NEAR / 10n;
 const TGAS = 10n ** 12n;
 
-const provider = new JsonRpcProvider({ url: "https://rpc.testnet.near.org" });
+const provider = new JsonRpcProvider({ url: "https://test.rpc.fastnear.com" });
 
 function signer(accountId: string): Account {
   const file = join(homedir(), ".near-credentials", "testnet", `${accountId}.json`);

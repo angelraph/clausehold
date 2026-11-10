@@ -31,7 +31,7 @@ export function agentEnv(): AgentEnv {
   return {
     network,
     desk: (process.env.CLAUSEHOLD_DESK_URL ?? (network === "mainnet" ? "https://clausehold-api-mainnet.vercel.app" : "https://clausehold-api-testnet.vercel.app")).replace(/\/$/, ""),
-    rpc: process.env.CLAUSEHOLD_NEAR_RPC_URL ?? (network === "mainnet" ? "https://rpc.mainnet.near.org" : "https://rpc.testnet.near.org"),
+    rpc: process.env.CLAUSEHOLD_NEAR_RPC_URL ?? (network === "mainnet" ? "https://rpc.mainnet.fastnear.com" : "https://test.rpc.fastnear.com"),
     factory: process.env.CLAUSEHOLD_FACTORY_ACCOUNT ?? (network === "mainnet" ? "clausehold.near" : "clausehold.testnet"),
     token: process.env.CLAUSEHOLD_TOKEN ?? (network === "mainnet" ? "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1" : "musd.clausehold.testnet"),
     mandateId: process.env.CLAUSEHOLD_MANDATE_ID ?? "b2f1e9a0-1a2b-4c3d-8e4f-000000000001",
@@ -281,6 +281,9 @@ export async function deliver(inviteId: string, work: string, env: AgentEnv = ag
     { method: "POST", body: JSON.stringify({ signedDelegate: toBase64(encodeSignedDelegate(delegate, signature)) }) },
     env
   );
+  // Trust the chain, not the relay reply: a delivery counts only if the clause left "funded".
+  const after = await view<string>(env, clause, "get_state");
+  if (after === "funded") throw new AgentError(`The clause refused the delivery (tx ${relayed.txHash}); it is still funded`);
   return { clause, hash, txHash: relayed.txHash, status: relayed.status };
 }
 
