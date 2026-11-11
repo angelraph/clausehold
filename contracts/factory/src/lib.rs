@@ -7,6 +7,8 @@
 //!   key for the worker, limited to `submit_delivery` on `r-<n>`.
 //! - Clauses report back through `record_outcome`. A return gives the
 //!   reservation back; a release keeps it counted.
+//! - A clause not funded within `FUNDING_WINDOW_SECS` can be cancelled by
+//!   anyone, which gives its reservation back without touching standing.
 //! - Every transition emits a NEP-297 `EVENT_JSON` log.
 
 use near_sdk::json_types::U128;
@@ -33,6 +35,10 @@ pub const CLAUSE_OPS_BUFFER: NearToken = NearToken::from_millinear(100);
 pub const WORKER_KEY_ALLOWANCE: NearToken = NearToken::from_millinear(50);
 /// Bytes the factory stores per clause (record, receipt, indexes).
 pub const FACTORY_BYTES_PER_CLAUSE: u64 = 1_500;
+/// A new clause must be funded within this many seconds. After that it
+/// refuses deposits and anyone may cancel it, which frees its reservation
+/// against the day's caps. Stops unfunded clauses from filling the caps.
+pub const FUNDING_WINDOW_SECS: u64 = 600;
 
 const NS_PER_SEC: u64 = 1_000_000_000;
 const NS_PER_DAY: u64 = 86_400 * NS_PER_SEC;
@@ -73,6 +79,9 @@ pub struct Mandate {
 pub enum Outcome {
     Released,
     Returned,
+    /// Never funded within the funding window. Frees the reservation; no
+    /// standing change and no receipt, since no money moved.
+    Cancelled,
 }
 
 #[near(serializers = [json, borsh])]
@@ -421,6 +430,7 @@ impl Factory {
                 "terms_hash": terms_hash,
                 "challenge_secs": challenge_secs,
                 "cosigner": mandate.cosigner,
+                "funding_deadline": now / NS_PER_SEC + FUNDING_WINDOW_SECS,
             }
         });
         let funding = clause_funding(code.len() as u64);
@@ -520,9 +530,23 @@ impl Factory {
         if rec.status != ClauseStatus::Live {
             return false;
         }
+        if outcome == Outcome::Cancelled {
+            rec.status = ClauseStatus::Returned;
+            self.clauses.insert(id, rec.clone());
+            let p = &mut self.standing_mut(&rec.payee).as_payee;
+            p.open = p.open.saturating_sub(1);
+            let b = &mut self.standing_mut(&rec.buyer).as_buyer;
+            b.open = b.open.saturating_sub(1);
+            self.unreserve(&rec);
+            emit(
+                "clause_cancelled",
+                json!({ "clause_id": id, "account_id": rec.account_id, "amount": rec.amount }),
+            );
+            return true;
+        }
         rec.status = match outcome {
             Outcome::Released => ClauseStatus::Released,
-            Outcome::Returned => ClauseStatus::Returned,
+            Outcome::Returned | Outcome::Cancelled => ClauseStatus::Returned,
         };
         self.clauses.insert(id, rec.clone());
 
@@ -534,7 +558,7 @@ impl Factory {
                     p.released += 1;
                     p.released_volume = U128(p.released_volume.0 + paid.0);
                 }
-                Outcome::Returned => p.returned += 1,
+                Outcome::Returned | Outcome::Cancelled => p.returned += 1,
             }
         }
         {
@@ -545,7 +569,7 @@ impl Factory {
                     b.released += 1;
                     b.released_volume = U128(b.released_volume.0 + paid.0);
                 }
-                Outcome::Returned => b.returned += 1,
+                Outcome::Returned | Outcome::Cancelled => b.returned += 1,
             }
         }
         if outcome == Outcome::Returned {

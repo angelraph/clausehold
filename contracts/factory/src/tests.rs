@@ -386,3 +386,41 @@ fn named_account_check() {
     assert!(!is_named(&acc(&"0".repeat(64))));
     assert!(!is_named(&acc("0x1234567890123456789012345678901234567890")));
 }
+
+#[test]
+fn cancelled_frees_reservation_without_touching_standing() {
+    let mut f = factory();
+    let id = live(&mut f, payee(), 2 * USDC);
+    assert_eq!(f.usage(payee()).daily_used, U128(2 * USDC));
+    set(acc("r-0.clausehold.near"));
+    assert!(f.record_outcome(id, Outcome::Cancelled, U128(0)));
+    assert_eq!(f.usage(payee()).payee_used, U128(0));
+    assert_eq!(f.usage(payee()).daily_used, U128(0));
+    let s = f.standing(payee());
+    assert_eq!((s.as_payee.open, s.as_payee.returned, s.as_payee.released), (0, 0, 0));
+    let b = f.standing(buyer());
+    assert_eq!((b.as_buyer.open, b.as_buyer.returned), (0, 0));
+    assert_eq!(f.get_clause(id).unwrap().status, ClauseStatus::Returned);
+    assert!(f.get_receipts(None, None, None).is_empty());
+    assert!(events().contains(&"clause_cancelled".to_string()));
+    // A duplicate report changes nothing.
+    assert!(!f.record_outcome(id, Outcome::Cancelled, U128(0)));
+}
+
+#[test]
+fn cancelled_clause_makes_room_for_the_next() {
+    let mut f = factory();
+    // A spammer fills most of the day's cap (10) with unfunded clauses.
+    let ids: Vec<u64> = ["a.near", "b.near", "c.near"]
+        .iter()
+        .map(|p| live(&mut f, acc(p), 3 * USDC))
+        .collect();
+    assert_eq!(f.usage(payee()).daily_used, U128(9 * USDC));
+    // One of them is cancelled after its funding window.
+    set(acc(&format!("r-{}.clausehold.near", ids[0])));
+    assert!(f.record_outcome(ids[0], Outcome::Cancelled, U128(0)));
+    assert_eq!(f.usage(payee()).daily_used, U128(6 * USDC));
+    // A real job for 3 now fits the same day (9 + 3 would not have).
+    live(&mut f, payee(), 3 * USDC);
+    assert_eq!(f.usage(payee()).daily_used, U128(9 * USDC));
+}

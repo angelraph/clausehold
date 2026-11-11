@@ -18,7 +18,7 @@ All args are JSON. Conventions:
 | `set_mandate` | `{mandate: Mandate}` | 0 | 30 Tgas | owner (the DAO) |
 | `set_owner` | `{owner: AccountId}` | 0 | 30 Tgas | owner |
 | `create_clause` | `{buyer, payee, worker_pk, asset, amount: U128, deadline: u64 secs, terms_hash: string, challenge_secs: u64}` | **≥ `create_deposit()` yocto** (excess refunded) | **300 Tgas** | anyone, or only `mandate.creators` if non-empty |
-| `record_outcome` | `{id: u64, outcome: "released"\|"returned", paid: U128}` | 0 | — | only the clause account `r-<id>` |
+| `record_outcome` | `{id: u64, outcome: "released"\|"returned"\|"cancelled", paid: U128}` | 0 | — | only the clause account `r-<id>` |
 | `on_clause_created`, `on_clause_registered` | callbacks | | | private |
 
 `create_clause` returns (as the final tx value) `"r-<n>.<factory>"`, or `null` if account creation failed (the deposit is refunded and the reservation released).
@@ -74,6 +74,7 @@ Keys: exactly one, a FunctionCall key `worker_pk`, receiver `r-<n>`, method_name
 | `submit_delivery` | `{hash: string, note_hash?: string}` | **0** | **≥150 Tgas** (if challenge 0) | **predecessor must equal r-<n>**: the worker FC key, direct or delegated | `funded` and before deadline → `delivered`; `challenge_secs == 0` → pays the payee in the same call |
 | `release` | `{}` | 0 | 150 Tgas | anyone | `delivered` and window passed → pays the payee |
 | `expire` | `{}` | 0 | 150 Tgas | anyone | `open`/`funded` and `now ≥ deadline` → whole balance to buyer |
+| `cancel_unfunded` | `{}` | 0 | 150 Tgas | anyone | still `open` and `now ≥ funding_deadline` (10 min after creation) → any partial deposit to buyer, reports `cancelled`: the factory frees the cap reservation, standing unchanged, no receipt. Deposits after the window are refunded. *(branch `claude/fund-time-caps`, not deployed)* |
 | `freeze` | `{}` | 0 | 30 Tgas | buyer | `delivered`, inside window, cosigner set → `frozen` |
 | `cosign` | `{decision: "release" \| "return"}` | 0 | 150 Tgas | buyer or mandate cosigner | when both votes match, runs it; calling again retries a failed payout |
 | `report_outcome` | `{}` | 0 | 30 Tgas | anyone | re-sends the terminal outcome to the factory (idempotent); sets `reported` when the factory accepts it |
@@ -135,6 +136,7 @@ Clause (emitted by `r-<n>`):
 | `clause_cosign` | `{clause_id, by, decision}` |
 | `clause_released` | `{clause_id, payee, amount}` |
 | `clause_returned` | `{clause_id, buyer, amount}` |
+| `clause_cancelled` | `{clause_id}` on the clause; `{clause_id, account_id, amount}` on the factory *(not deployed)* |
 | `clause_swept` | `{clause_id, buyer, amount}` |
 | `clause_settle_failed` | `{clause_id, payout: "release"\|"return"\|"sweep", step: "storage_deposit"\|"ft_transfer"\|"ft_balance_of", to?}` |
 | `clause_sync_failed` | `{clause_id}` |
