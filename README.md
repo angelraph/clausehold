@@ -1,19 +1,124 @@
 # Clausehold
 
-Pay a person or an agent for a finished job, on NEAR.
+**Pay a person or an agent for finished work, on NEAR.**
 
-The money is held under a clause, and the clause is the only key that moves it. When the work is delivered, it goes to the person who did it. When the deadline passes first, it goes back to whoever paid.
+The money is held under a clause, and the clause is the only key that moves it. Each job gets its own NEAR account with one key, the worker's, which can do exactly one thing: deliver. Delivery pays the worker in the same transaction. If the deadline passes first, the money goes back to whoever paid.
 
-- Live site: https://clausehold.vercel.app (Testnet by default, switch at the top)
-- Testnet factory: [`clausehold.testnet`](https://testnet.nearblocks.io/address/clausehold.testnet)
-- Built for NEAR HACKATHON, November 2026. Tracks: agents, realworld, social, security.
-- **Judges:** [JUDGES.md](JUDGES.md) has a five-minute path. `npm run judge` runs every claim on testnet, including 15 attempts to break the rules that must each fail with their reason code.
+**[Open the app](https://clausehold.vercel.app)** · [Watch the demo](media/clausehold-demo.mp4) · [Judges: five-minute path](JUDGES.md) · [Threat model](docs/THREAT_MODEL.md) · [Contract ABI](contracts/ABI.md)
 
-## The problem
+[![Clausehold demo video, 3 minutes 20](media/thumbnail.jpg)](media/clausehold-demo.mp4)
 
-A studio, a DAO or an AI agent wants to pay someone for a piece of work: a 30 second cut, a translation, a bug fix. Today it either pays first and hopes, or the worker delivers first and hopes. An escrow service fixes that by holding the money, which means trusting the escrow service.
+*The demo: one job from invite to payout on the live site, an agent hiring an agent over MCP, 15 refused attacks, and the first clause on mainnet.*
 
-Clausehold holds the money in a NEAR account that exists for one job only. That account has no owner key. Its code allows exactly three exits: to the payee on delivery, back to the buyer on expiry, or back to the buyer after a dispute is settled. Nobody, including us, can take it anywhere else.
+Built solo for NEAR HACKATHON, November 2026.
+
+## At a glance
+
+| | |
+|---|---|
+| **What it is** | Escrow with no escrow agent: a per-job NEAR account whose only key can deliver, and whose code can only pay the worker or refund the buyer |
+| **Live on mainnet** | Factory [`clausehold.near`](https://nearblocks.io/address/clausehold.near). Clause `r-0.clausehold.near` paid 2 real USDC to `angelraph.near`, then closed itself |
+| **Live on testnet** | [clausehold.vercel.app](https://clausehold.vercel.app) with free test tokens, factory [`clausehold.testnet`](https://testnet.nearblocks.io/address/clausehold.testnet) owned by a Sputnik DAO |
+| **For workers** | No wallet, no gas. A passkey in the browser is the only key the clause accepts; the desk relays the signed delivery |
+| **For agents** | An MCP server with 7 tools. One agent hires another, funds the job, and pays only for delivered work |
+| **Earned standing** | Every paid job is a line in the worker's public record. New workers are capped at 10; one paid job lifts that to 25, enforced by the contract |
+| **Proof** | `npm run judge`: 25 checks on testnet, 15 of them attempts to cheat, each refused with its reason code |
+| **Tracks** | agents · realworld · social · security |
+
+## Contents
+
+- [The idea in one minute](#the-idea-in-one-minute)
+- [Live on mainnet](#live-on-mainnet)
+- [Product tour](#product-tour)
+- [How it works](#how-it-works)
+- [Try it in five minutes](#try-it-in-five-minutes)
+- [What it looks like on chain](#what-it-looks-like-on-chain)
+- [Why NEAR](#why-near)
+- [The mandate](#the-mandate)
+- [Run it yourself](#run-it-yourself)
+- [For agents](#for-agents)
+- [What can go wrong, and what happens](#what-can-go-wrong-and-what-happens)
+- [Honest limits](#honest-limits)
+
+## The idea in one minute
+
+A studio, a DAO or an AI agent wants to pay someone for a piece of work: a 30 second cut, a translation, a bug fix. Today it either pays first and hopes, or the worker delivers first and hopes. An escrow service fixes that by holding the money, which means trusting the escrow service, and paying its cut. Agents hiring agents have nobody to trust at all.
+
+| | who holds the money | what can go wrong |
+|---|---|---|
+| Pay first | the worker | the work never comes |
+| Work first | the buyer | the money never comes |
+| Escrow service | a company | it freezes, fails, or takes a cut |
+| **Clausehold** | **a NEAR account made for this one job** | **nothing outside its code: pay on delivery, refund at the deadline** |
+
+That account has no owner key. Its code allows exactly three exits: to the payee on delivery, back to the buyer on expiry, or back to the buyer after a dispute is settled. Nobody, including us, can take it anywhere else.
+
+## Live on mainnet
+
+The factory is deployed at [`clausehold.near`](https://nearblocks.io/address/clausehold.near) with a real mandate: native USDC only, at most 5 USDC per clause, new payees at most 3, and only `clausehold.near` may write clauses. One real job ran end to end with real USDC:
+
+| step | transaction |
+|---|---|
+| deploy the factory | [`57Ujmi4P…`](https://nearblocks.io/txns/57Ujmi4PcRfH4ZqFiYTeLjuE9Jn6u5zB38cm3aB5KGC8) |
+| upload the clause code (same code as testnet, sha256 `a765271079ca…`) | [`5ZXubHJ1…`](https://nearblocks.io/txns/5ZXubHJ1uAAxsMtTfpTkpgUPRuFhEhVYaWWEAZbQxerL) |
+| set the mandate | [`hU8Tq2Ej…`](https://nearblocks.io/txns/hU8Tq2EjKnVLgejcqh24VNQjHDqVYVH39WkeL9xLxWJ) |
+| write `r-0.clausehold.near` for 2 USDC to `angelraph.near` | [`JDosYTk7…`](https://nearblocks.io/txns/JDosYTk7TysbDYEN6n2yj5tfHQmpFAxGBcrXtQcgu4Le) |
+| fund it with 2 USDC | [`H7frpW7B…`](https://nearblocks.io/txns/H7frpW7BVVoqTNSERMzBGRgy3T6A3xxWC6bgrjZAbx6d) |
+| the worker key signs the delivery, `clausehold.near` relays it; released, `angelraph.near` +2 USDC | [`FCJwGQWG…`](https://nearblocks.io/txns/FCJwGQWGatZ4MVjai1KNMRnCNwzfgZmrimCvFFTWZZpW) |
+| close: the account deletes itself, 1.986 NEAR back to the buyer | [`8bKWE8is…`](https://nearblocks.io/txns/8bKWE8isMrGPZUKS5HRG1RPwQu9e4TTFx4hcHr13mKVW) |
+
+Funding from another chain goes through NEAR Intents. A dry 1Click quote for USDC on Base delivering exactly 2 USDC on NEAR asked for 2.0206 USDC and estimated 35 seconds, with refunds set to land on NEAR. `npx tsx scripts/mainnet-proof.ts --payee <account> --dry` prints the costs of a run without sending anything.
+
+## Product tour
+
+**Write a clause.** The buyer names the payee, the amount, the deadline and an optional acceptance check. The desk checks it against the treasury's rules before anyone signs.
+
+![Writing a clause](media/write.jpg)
+
+**Accept as the worker.** The invite page makes a passkey that becomes the only key the clause will accept. The worker can run the acceptance check before starting.
+
+![The worker's invite page](media/accept.jpg)
+
+**Funded, then paid.** The clause page follows the job on chain, from written to funded to released.
+
+![A funded clause](media/funded.jpg)
+
+**Earned standing.** Every account's record of paid jobs, read from the factory, with the limit it has earned.
+
+![Standing](media/standing.jpg)
+
+## How it works
+
+```mermaid
+sequenceDiagram
+    participant B as Buyer (person, DAO or agent)
+    participant D as Desk
+    participant F as Factory clausehold.near
+    participant C as Clause r-n.clausehold.near
+    participant W as Worker
+    B->>D: propose a job (payee, amount, deadline, check)
+    D-->>B: PASS against the mandate, invite link
+    W->>D: accept: browser makes the job key (public half only)
+    B->>F: create_clause (checked again on chain)
+    F->>C: create account, deploy code, add the one worker key
+    B->>C: ft_transfer_call (exact amount)
+    W->>D: signed submit_delivery (meta-transaction)
+    D->>C: relay it, desk pays the gas
+    C->>W: pay the worker in the same transaction
+    C->>F: report released (worker's standing +1)
+    Note over C: past the deadline instead: anyone calls expire, money back to the buyer
+    B->>C: close: account deletes itself, storage NEAR back to the buyer
+```
+
+```mermaid
+flowchart LR
+    O[Open] -->|ft_transfer_call| Fu[Funded]
+    Fu -->|worker key delivers| R[Released: worker paid]
+    Fu -->|deadline passes, anyone calls expire| X[Returned: buyer refunded]
+    Fu -->|buyer freezes in review window| Z[Frozen: buyer and DAO co-signer decide]
+    R --> Cl[Closed: account deleted, deposit back]
+    X --> Cl
+```
 
 ## Try it in five minutes
 
@@ -40,22 +145,6 @@ Everything below is on testnet, so it is free.
 **7. Check the record.** Open the **Desk**. The clause shows **Released**. Its receipt page and the payee's standing page read straight from the contract.
 
 To see a refusal, go back to step 2 and ask for `12`. The clause is refused before anyone signs, and the reason names the rule: a payee who has never been paid may be offered at most 10. Ask for `40` and the per-clause cap of 25 refuses it too. The same rules run inside the factory contract, so calling it directly fails the same way.
-
-## Live on mainnet
-
-The factory is deployed at [`clausehold.near`](https://nearblocks.io/address/clausehold.near) with a real mandate: native USDC only, at most 5 USDC per clause, new payees at most 3, and only `clausehold.near` may write clauses. One real job ran end to end with real USDC:
-
-| step | transaction |
-|---|---|
-| deploy the factory | [`57Ujmi4P…`](https://nearblocks.io/txns/57Ujmi4PcRfH4ZqFiYTeLjuE9Jn6u5zB38cm3aB5KGC8) |
-| upload the clause code (same code as testnet, sha256 `a765271079ca…`) | [`5ZXubHJ1…`](https://nearblocks.io/txns/5ZXubHJ1uAAxsMtTfpTkpgUPRuFhEhVYaWWEAZbQxerL) |
-| set the mandate | [`hU8Tq2Ej…`](https://nearblocks.io/txns/hU8Tq2EjKnVLgejcqh24VNQjHDqVYVH39WkeL9xLxWJ) |
-| write `r-0.clausehold.near` for 2 USDC to `angelraph.near` | [`JDosYTk7…`](https://nearblocks.io/txns/JDosYTk7TysbDYEN6n2yj5tfHQmpFAxGBcrXtQcgu4Le) |
-| fund it with 2 USDC | [`H7frpW7B…`](https://nearblocks.io/txns/H7frpW7BVVoqTNSERMzBGRgy3T6A3xxWC6bgrjZAbx6d) |
-| the worker key signs the delivery, `clausehold.near` relays it; released, `angelraph.near` +2 USDC | [`FCJwGQWG…`](https://nearblocks.io/txns/FCJwGQWGatZ4MVjai1KNMRnCNwzfgZmrimCvFFTWZZpW) |
-| close: the account deletes itself, 1.986 NEAR back to the buyer | [`8bKWE8is…`](https://nearblocks.io/txns/8bKWE8isMrGPZUKS5HRG1RPwQu9e4TTFx4hcHr13mKVW) |
-
-Funding from another chain goes through NEAR Intents. A dry 1Click quote for USDC on Base delivering exactly 2 USDC on NEAR asked for 2.0206 USDC and estimated 35 seconds, with refunds set to land on NEAR. `npx tsx scripts/mainnet-proof.ts --payee <account> --dry` prints the costs of a run without sending anything.
 
 ## What it looks like on chain
 
@@ -104,7 +193,7 @@ The payee sees the check on the invite page and can run it before delivering. A 
 
 ### Limits are earned
 
-A payee nobody has paid yet can be offered at most the new-payee ceiling (10 on testnet). Once one clause is released to them, the factory lifts that to the full per-clause cap (25). The factory reads this from its own record of released clauses when a clause is written, so it cannot be skipped, and the desk reads the same record before any wallet prompt. Ask for 12 for a brand-new account and the desk refuses it, naming `newPayeeCeiling`. Ask for 12 for `clausehold.testnet`, which has 3 released clauses, and it passes.
+A payee nobody has paid yet can be offered at most the new-payee ceiling (10 on testnet). Once one clause is released to them, the factory lifts that to the full per-clause cap (25). The factory reads this from its own record of released clauses when a clause is written, so it cannot be skipped, and the desk reads the same record before any wallet prompt. Ask for 12 for a brand-new account and the desk refuses it, naming `newPayeeCeiling`. Ask for 12 for `clausehold.testnet`, which has been paid through many released clauses, and it passes.
 
 Every account's record is public: the [Standing page](https://clausehold.vercel.app/standing) ranks payees by released clauses, and each account page shows the limit it has earned and a badge it can embed anywhere, drawn from the chain:
 
@@ -252,6 +341,8 @@ This repository previously held **CHARTER**, a policy layer for AI trading agent
 
 Code in this repository was written with help from Claude, an AI assistant, and reviewed and run by the author.
 
+---
+
 ## License
 
-MIT
+[MIT](LICENSE). Built by [angelraph](https://github.com/angelraph) for NEAR HACKATHON, November 2026.
