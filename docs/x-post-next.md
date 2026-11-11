@@ -26,7 +26,7 @@ What's next on the list:
 
 1. Count the limits when a job is funded, not when it's written. That closes the gap for good.
 2. A daily limit per buyer, so one person can never crowd out everyone else.
-3. Hand the mainnet contract to a DAO with a real council, the way testnet already works.
+3. Hand the mainnet contract to a DAO, the way testnet already does, and grow that council past one member.
 4. Open mainnet to everyone, with gas-free delivery for workers.
 5. A paid cross-chain run through NEAR Intents: fund a job with USDC from Base and watch it land on NEAR.
 
