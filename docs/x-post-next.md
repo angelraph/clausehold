@@ -32,7 +32,7 @@ What's next on the list:
 
 The goal hasn't changed: you should be able to hire anyone, a person or an AI agent, without trusting anyone. Each fix gets it a step closer.
 
-The weak spots, the fixes and the tests behind them are all public:
-https://github.com/angelraph/clausehold/blob/master/docs/THREAT_MODEL.md
+The fix, its tests and the full list of known weak spots are public:
+https://github.com/angelraph/clausehold/pull/26
 
 Try it free on testnet: https://clausehold.vercel.app
