@@ -90,6 +90,9 @@ pub enum Decision {
 pub enum Outcome {
     Released,
     Returned,
+    /// Never funded within the funding window, then cancelled. The factory
+    /// gives the cap reservation back and leaves standing untouched.
+    Cancelled,
 }
 
 /// Why tokens are leaving the clause.
@@ -117,6 +120,10 @@ pub struct ClauseArgs {
     pub terms_hash: String,
     pub challenge_secs: u64,
     pub cosigner: Option<AccountId>,
+    /// Unix seconds. After this an unfunded clause refuses deposits and
+    /// anyone may cancel it. None: no funding window.
+    #[serde(default)]
+    pub funding_deadline: Option<u64>,
 }
 
 #[near(serializers = [json])]
@@ -145,6 +152,9 @@ pub struct ClauseView {
     pub paid: U128,
     /// The factory has recorded the outcome, so the clause may be closed.
     pub reported: bool,
+    pub funding_deadline: Option<u64>,
+    /// Cancelled unfunded, rather than returned after a funded run.
+    pub cancelled: bool,
 }
 
 #[near(contract_state)]
@@ -176,6 +186,9 @@ pub struct Clause {
     /// Set once the factory has recorded the outcome. `close` waits for it,
     /// so standing is never lost when the account goes away.
     reported: bool,
+    /// 0 means no funding window.
+    funding_deadline_ns: u64,
+    cancelled: bool,
 }
 
 pub fn emit(event: &str, data: serde_json::Value) {
@@ -234,6 +247,8 @@ impl Clause {
             settling: false,
             paid: 0,
             reported: false,
+            funding_deadline_ns: args.funding_deadline.unwrap_or(0).saturating_mul(NS_PER_SEC),
+            cancelled: false,
         };
         emit(
             "clause_open",
@@ -268,6 +283,8 @@ impl Clause {
             settling: self.settling,
             paid: U128(self.paid),
             reported: self.reported,
+            funding_deadline: (self.funding_deadline_ns > 0).then(|| self.funding_deadline_ns / NS_PER_SEC),
+            cancelled: self.cancelled,
         }
     }
 
@@ -288,7 +305,7 @@ impl Clause {
     ) -> PromiseOrValue<U128> {
         let _ = msg;
         require!(env::predecessor_account_id() == self.asset, "WRONG_ASSET");
-        if self.state != State::Open || self.settling {
+        if self.state != State::Open || self.settling || self.funding_closed() {
             return PromiseOrValue::Value(amount);
         }
         let needed = self.amount.saturating_sub(self.known_balance);
@@ -329,7 +346,7 @@ impl Clause {
         };
         self.known_balance = bal;
         match self.state {
-            State::Open if bal >= self.amount => {
+            State::Open if bal >= self.amount && !self.funding_closed() => {
                 self.mark_funded();
                 PromiseOrValue::Value(true)
             }
@@ -404,6 +421,18 @@ impl Clause {
         self.begin_return()
     }
 
+    /// Anyone may call once the funding window has passed on a clause that
+    /// was never funded. Any partial deposit goes back to the buyer, and the
+    /// factory frees the amount it held against the day's caps.
+    pub fn cancel_unfunded(&mut self) -> Promise {
+        require!(self.state == State::Open, "NOT_OPEN");
+        require!(!self.settling, "SETTLING");
+        require!(self.funding_closed(), "FUNDING_WINDOW_OPEN");
+        self.cancelled = true;
+        emit("clause_cancelled", json!({ "clause_id": self.id }));
+        self.begin_return()
+    }
+
     /// Buyer only, inside the challenge window. Needs a mandate co-signer.
     pub fn freeze(&mut self) {
         require!(env::predecessor_account_id() == self.buyer, "ONLY_BUYER");
@@ -454,7 +483,7 @@ impl Clause {
     pub fn report_outcome(&self) -> Promise {
         let outcome = match self.state {
             State::Released => Outcome::Released,
-            State::Returned => Outcome::Returned,
+            State::Returned => self.return_outcome(),
             _ => env::panic_str("NOT_TERMINAL"),
         };
         self.record_outcome(outcome)
@@ -523,7 +552,7 @@ impl Clause {
         if bal == 0 {
             self.settling = false;
             self.finish(Payout::Return, self.buyer.clone(), 0);
-            return PromiseOrValue::Promise(self.record_outcome(Outcome::Returned));
+            return PromiseOrValue::Promise(self.record_outcome(self.return_outcome()));
         }
         PromiseOrValue::Promise(self.register_then_transfer(Payout::Return, self.buyer.clone(), bal))
     }
@@ -566,13 +595,25 @@ impl Clause {
         self.finish(payout, to, amount.0);
         match payout {
             Payout::Release => PromiseOrValue::Promise(self.record_outcome(Outcome::Released)),
-            Payout::Return => PromiseOrValue::Promise(self.record_outcome(Outcome::Returned)),
+            Payout::Return => PromiseOrValue::Promise(self.record_outcome(self.return_outcome())),
             Payout::Sweep => PromiseOrValue::Value(true),
         }
     }
 }
 
 impl Clause {
+    fn funding_closed(&self) -> bool {
+        self.funding_deadline_ns > 0 && now_ns() >= self.funding_deadline_ns
+    }
+
+    fn return_outcome(&self) -> Outcome {
+        if self.cancelled {
+            Outcome::Cancelled
+        } else {
+            Outcome::Returned
+        }
+    }
+
     fn mark_funded(&mut self) {
         self.state = State::Funded;
         emit(

@@ -68,6 +68,7 @@ fn args(challenge_secs: u64) -> ClauseArgs {
         terms_hash: "abc123".into(),
         challenge_secs,
         cosigner: Some(cosigner()),
+        funding_deadline: None,
     }
 }
 
@@ -538,4 +539,87 @@ fn close_twice_at_once_fails() {
     set(acc("anyone.near"), T0 + 20 * SEC);
     c.close();
     c.close();
+}
+// ---------------------------------------------------------- funding window
+
+const WINDOW: u64 = 600;
+
+fn open_windowed() -> Clause {
+    set(factory(), T0);
+    Clause::new(ClauseArgs { funding_deadline: Some(T0 / SEC + WINDOW), ..args(0) })
+}
+
+#[test]
+fn funding_inside_window_works() {
+    let mut c = open_windowed();
+    assert_eq!(c.get_clause().funding_deadline, Some(T0 / SEC + WINDOW));
+    set(usdc(), T0 + (WINDOW - 1) * SEC);
+    let r = c.ft_on_transfer(buyer(), U128(AMOUNT), String::new());
+    assert!(matches!(r, PromiseOrValue::Value(U128(0))));
+    assert_eq!(c.get_state(), State::Funded);
+}
+
+#[test]
+fn deposit_after_window_is_refunded() {
+    let mut c = open_windowed();
+    set(usdc(), T0 + WINDOW * SEC);
+    let r = c.ft_on_transfer(buyer(), U128(AMOUNT), String::new());
+    assert!(matches!(r, PromiseOrValue::Value(U128(a)) if a == AMOUNT));
+    assert_eq!(c.get_state(), State::Open);
+}
+
+#[test]
+fn sync_after_window_does_not_fund() {
+    let mut c = open_windowed();
+    set_with_result(me(), T0 + WINDOW * SEC, PromiseResult::Successful(serde_json::to_vec(&U128(AMOUNT)).unwrap()));
+    c.on_sync_balance(Ok(U128(AMOUNT)));
+    assert_eq!(c.get_state(), State::Open);
+}
+
+#[test]
+#[should_panic(expected = "FUNDING_WINDOW_OPEN")]
+fn cancel_inside_window_fails() {
+    let mut c = open_windowed();
+    set(acc("anyone.near"), T0 + (WINDOW - 1) * SEC);
+    c.cancel_unfunded();
+}
+
+#[test]
+#[should_panic(expected = "FUNDING_WINDOW_OPEN")]
+fn cancel_without_window_fails() {
+    let mut c = open(0);
+    set(acc("anyone.near"), T0 + 10_000 * SEC);
+    c.cancel_unfunded();
+}
+
+#[test]
+#[should_panic(expected = "NOT_OPEN")]
+fn cancel_funded_clause_fails() {
+    let mut c = open_windowed();
+    set(usdc(), T0);
+    c.ft_on_transfer(buyer(), U128(AMOUNT), String::new());
+    set(acc("anyone.near"), T0 + WINDOW * SEC);
+    c.cancel_unfunded();
+}
+
+#[test]
+fn cancel_after_window_returns_and_reports_cancelled() {
+    let mut c = open_windowed();
+    set(acc("anyone.near"), T0 + WINDOW * SEC);
+    c.cancel_unfunded();
+    assert!(c.get_clause().cancelled);
+    assert!(c.get_clause().settling);
+    assert!(events().contains(&"clause_cancelled".to_string()));
+    // Nothing was deposited: the balance read finds 0 and the clause settles.
+    set_with_result(me(), T0 + WINDOW * SEC, PromiseResult::Successful(serde_json::to_vec(&U128(0)).unwrap()));
+    c.on_return_balance(Ok(U128(0)));
+    assert_eq!(c.get_state(), State::Returned);
+    assert!(!c.get_clause().settling);
+    assert!(matches!(c.return_outcome(), Outcome::Cancelled));
+}
+
+#[test]
+fn ordinary_return_still_reports_returned() {
+    let c = funded(0);
+    assert!(matches!(c.return_outcome(), Outcome::Returned));
 }
